@@ -1,0 +1,195 @@
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
+import { api, ApiError, useApi } from "@/lib/api";
+import { label, money, useSession } from "@/lib/session";
+import { Badge, Button, Card, ErrorState, Field, inputClass, Loading, Notice, PageHeader } from "@/components/ui";
+
+type Guide = { sentence_length: string; jargon_level: string; banned_phrases: string[]; rules: string[] };
+type Brain = { brain: { voice: { guide: Guide; do_words: string[]; dont_words: string[] } } };
+type Budget = { weekly_limit_usd: number; spent_this_week_usd: number };
+type Models = { options: { model: string; input_per_mtok: number; output_per_mtok: number }[]; roles: { role: string; model: string; default: string }[] };
+type Source = { source: string; rows: number; matched: number; last_upload: string | null };
+
+const SOURCE_NAMES: Record<string, string> = { linkedin: "LinkedIn post analytics", gsc: "Google Search Console", ga4: "Google Analytics 4", email: "Email tool", ads: "Ad platform" };
+
+function useSaver() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [saved, setSaved] = useState("");
+  async function save(action: () => Promise<unknown>, message: string) {
+    setBusy(true);
+    setError(null);
+    setSaved("");
+    try {
+      await action();
+      setSaved(message);
+    } catch (caught) {
+      setError(caught as ApiError);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return { busy, error, saved, save };
+}
+
+function Voice({ workspace }: { workspace: string }) {
+  const brain = useApi<Brain>(`/workspaces/${workspace}/brain`);
+  const [rules, setRules] = useState<string>();
+  const [banned, setBanned] = useState<string>();
+  const { busy, error, saved, save } = useSaver();
+  if (brain.loading) return <Loading rows={1} />;
+  if (brain.error) return <ErrorState error={brain.error} retry={brain.reload} />;
+  const guide = brain.data!.brain.voice.guide;
+  const lines = (text: string) => text.split("\n").map((line) => line.trim()).filter(Boolean);
+  const rulesText = rules ?? guide.rules.join("\n");
+  const bannedText = banned ?? guide.banned_phrases.join("\n");
+  return (
+    <div className="space-y-4">
+      <Field label="Rules the writer follows" hint="One per line">
+        <textarea className={inputClass} rows={Math.max(4, lines(rulesText).length + 1)} value={rulesText} onChange={(event) => setRules(event.target.value)} />
+      </Field>
+      <Field label="Banned words and phrases" hint="One per line. A draft using one is blocked.">
+        <textarea className={inputClass} rows={Math.max(3, lines(bannedText).length + 1)} value={bannedText} onChange={(event) => setBanned(event.target.value)} />
+      </Field>
+      <p className="text-sm text-muted">Sentence length: {guide.sentence_length || "not set"} · Jargon: {guide.jargon_level}. Rules are also added automatically when you make the same edit three times.</p>
+      {error && <ErrorState error={error} />}
+      {saved && <Notice tone="good">{saved}</Notice>}
+      <Button variant="primary" busy={busy} disabled={rules === undefined && banned === undefined} onClick={() => save(async () => { await api(`/workspaces/${workspace}/brain/field`, { method: "PUT", body: { path: "voice.guide", value: { ...guide, rules: lines(rulesText), banned_phrases: lines(bannedText) } } }); brain.reload(); }, "Voice rules saved as a new version of the brain.")}>
+        Save voice rules
+      </Button>
+    </div>
+  );
+}
+
+function BudgetCard({ workspace }: { workspace: string }) {
+  const budget = useApi<Budget>(`/workspaces/${workspace}/budget`);
+  const [limit, setLimit] = useState<string>();
+  const { busy, error, saved, save } = useSaver();
+  if (budget.loading) return <Loading rows={1} />;
+  if (budget.error) return <ErrorState error={budget.error} retry={budget.reload} />;
+  const value = limit ?? String(budget.data!.weekly_limit_usd);
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted">Spent this week: <strong className="text-ink">{money(budget.data!.spent_this_week_usd)}</strong>. When the limit is reached the team stops and you get an alert.</p>
+      <Field label="Weekly limit (USD)">
+        <input className={`${inputClass} max-w-40`} type="number" min={0} step={1} inputMode="decimal" value={value} onChange={(event) => setLimit(event.target.value)} />
+      </Field>
+      {error && <ErrorState error={error} />}
+      {saved && <Notice tone="good">{saved}</Notice>}
+      <Button variant="primary" busy={busy} disabled={limit === undefined || Number.isNaN(Number(value))} onClick={() => save(async () => { await api(`/workspaces/${workspace}/budget`, { method: "PUT", body: { weekly_limit_usd: Number(value) } }); budget.reload(); }, "Budget updated.")}>
+        Save budget
+      </Button>
+    </div>
+  );
+}
+
+function ModelsCard() {
+  const models = useApi<Models>("/settings/models");
+  const [override, setOverride] = useState<Models>();
+  const { error, saved, save } = useSaver();
+  if (models.loading) return <Loading rows={1} />;
+  if (models.error) return <ErrorState error={models.error} retry={models.reload} />;
+  const data = override ?? models.data!;
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted">Applies to every workspace. A cheaper model lowers cost per piece; check the evals before relying on it.</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {data.roles.map((role) => (
+          <Field key={role.role} label={label(role.role)} hint={role.model !== role.default ? "changed" : undefined}>
+            <select className={inputClass} value={role.model} onChange={(event) => save(async () => setOverride(await api<Models>("/settings/models", { method: "PUT", body: { role: role.role, model: event.target.value } })), `${label(role.role)} now uses ${event.target.value}.`)}>
+              {data.options.map((option) => <option key={option.model} value={option.model}>{option.model} (${option.input_per_mtok} in / ${option.output_per_mtok} out per million tokens)</option>)}
+            </select>
+          </Field>
+        ))}
+      </div>
+      {error && <ErrorState error={error} />}
+      {saved && <Notice tone="good">{saved}</Notice>}
+    </div>
+  );
+}
+
+function Sources({ workspace }: { workspace: string }) {
+  const sources = useApi<Source[]>(`/workspaces/${workspace}/sources`);
+  const [message, setMessage] = useState<{ tone: "good" | "warn"; text: string }>();
+  const [error, setError] = useState<ApiError | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function upload(source: string, file: File | undefined) {
+    if (!file) return;
+    setBusy(source);
+    setError(null);
+    setMessage(undefined);
+    try {
+      const result = await api<{ rows: number; matched: number; unmatched_refs: string[] }>(`/workspaces/${workspace}/metrics/${source}`, { method: "POST", csv: await file.text() });
+      setMessage(result.rows === 0
+        ? { tone: "warn", text: "No rows were recognised in that file. Check that it is the CSV export and has a header row." }
+        : { tone: result.matched === result.rows ? "good" : "warn", text: `${result.matched} of ${result.rows} rows matched to a piece.${result.unmatched_refs.length ? ` Unmatched: ${result.unmatched_refs.slice(0, 3).join(", ")}.` : ""}` });
+      sources.reload();
+    } catch (caught) {
+      setError(caught as ApiError);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (sources.loading) return <Loading rows={1} />;
+  if (sources.error) return <ErrorState error={sources.error} retry={sources.reload} />;
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted">Upload the CSV export from each tool. Direct connections come later.</p>
+      {error && <ErrorState error={error} />}
+      {message && <Notice tone={message.tone}>{message.text}</Notice>}
+      <ul className="divide-y divide-line">
+        {sources.data!.map((source) => (
+          <li key={source.source} className="flex flex-wrap items-center justify-between gap-3 py-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{SOURCE_NAMES[source.source] ?? source.source}</p>
+              <p className="text-xs text-muted">
+                {source.rows ? `${source.matched} of ${source.rows} rows matched · last upload ${new Date(source.last_upload!).toLocaleDateString()}` : "Nothing uploaded yet"}
+              </p>
+            </div>
+            <label className={`inline-flex min-h-10 cursor-pointer items-center rounded-lg border border-line px-3.5 text-sm font-medium hover:bg-raised ${busy === source.source ? "opacity-50" : ""}`}>
+              {busy === source.source ? "Uploading…" : source.rows ? "Upload newer CSV" : "Upload CSV"}
+              <input type="file" accept=".csv,text/csv" className="sr-only" disabled={busy !== null} onChange={(event) => { upload(source.source, event.target.files?.[0]); event.target.value = ""; }} />
+            </label>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export default function Settings() {
+  const { workspace, workspaces, user, signOut } = useSession();
+  const name = workspaces.find((item) => item.workspace === workspace)?.name ?? workspace;
+  return (
+    <>
+      <PageHeader title="Settings" subtitle={name} />
+      <div className="max-w-3xl space-y-4">
+        <Card>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-semibold">Brand voice rules</h2>
+            <Link href="/onboarding" className="text-sm font-medium text-accent">Review the whole brain</Link>
+          </div>
+          <Voice key={workspace} workspace={workspace} />
+        </Card>
+        <Card><h2 className="mb-3 text-base font-semibold">Budget limit</h2><BudgetCard key={workspace} workspace={workspace} /></Card>
+        <Card>
+          <div id="sources" className="mb-3 scroll-mt-20"><h2 className="text-base font-semibold">Connected data sources</h2></div>
+          <Sources key={workspace} workspace={workspace} />
+        </Card>
+        <Card>
+          <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">Model choices {!user.is_admin && <Badge>Admin only</Badge>}</h2>
+          {user.is_admin ? <ModelsCard /> : <p className="text-sm text-muted">Ask an admin to change which model each team member uses.</p>}
+        </Card>
+        <Card>
+          <h2 className="mb-2 text-base font-semibold">Account</h2>
+          <p className="mb-3 text-sm text-muted">Signed in as {user.email}</p>
+          <Button onClick={signOut}>Sign out</Button>
+        </Card>
+      </div>
+    </>
+  );
+}

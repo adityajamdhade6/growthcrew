@@ -1,0 +1,16 @@
+Apply the {{ fw.name }} framework.
+
+Purpose: {{ fw.purpose }}
+
+Inputs to draw on:
+{% for item in fw.inputs %}
+- {{ item }}
+{% endfor %}
+
+How to apply it:
+{{ fw.instructions }}
+
+Your output will be judged against these criteria:
+{% for item in fw.quality_criteria %}
+- {{ item }}
+{% endfor %}

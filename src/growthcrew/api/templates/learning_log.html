@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning log · {{ workspace }}</title>
+<style>
+  :root { --ink:#1b2333; --muted:#5d6779; --line:#dfe3ea; --bg:#f7f8fa; --card:#fff;
+          --yes:#17663a; --no:#9b2c2c; --wait:#7a5b00; }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink:#e8ebf1; --muted:#9aa4b6; --line:#2c3445; --bg:#12161f; --card:#1a202c;
+            --yes:#6fd39a; --no:#f19999; --wait:#e6c35c; }
+  }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-size:1.6rem; margin:0 0 4px; }
+  h2 { font-size:1.05rem; margin:0 0 12px; }
+  h3 { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted);
+       margin:18px 0 6px; }
+  p.lede { color:var(--muted); margin:0 0 28px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px;
+            padding:18px 20px; margin-bottom:16px; }
+  ul { margin:0; padding-left:20px; }
+  li { margin-bottom:6px; }
+  .meta { color:var(--muted); font-size:.875rem; }
+  .tag { font-size:.75rem; font-weight:600; padding:2px 8px; border-radius:999px;
+         border:1px solid currentColor; white-space:nowrap; }
+  .accepted { color:var(--yes); } .rejected { color:var(--no); } .pending { color:var(--wait); }
+  .change { border-top:1px solid var(--line); padding-top:12px; margin-top:12px; }
+  .change:first-of-type { border-top:0; padding-top:0; margin-top:0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Learning log</h1>
+  <p class="lede">{{ workspace }} · how the strategy changed, newest first, and why.</p>
+  {% for entry in entries %}
+  <section>
+    {% if entry.kind == "learnings" %}
+    <h2>Week of {{ entry.window }}</h2>
+    <h3>What worked</h3>
+    <ul>{% for item in entry.what_worked %}<li>{{ item.statement }}
+      <span class="meta">({{ item.confidence }} confidence)</span></li>{% else %}<li class="meta">Nothing conclusive.</li>{% endfor %}</ul>
+    <h3>What did not</h3>
+    <ul>{% for item in entry.what_didnt %}<li>{{ item.statement }}
+      <span class="meta">({{ item.confidence }} confidence)</span></li>{% else %}<li class="meta">Nothing conclusive.</li>{% endfor %}</ul>
+    <h3>Experiment results</h3>
+    <ul>
+      {% for r in entry.significant %}<li><strong>{{ r.name }}</strong>: {{ r.winner }} won on {{ r.metric }}
+        (+{{ r.lift_pct }}% over the runner-up, p={{ r.p_value }}{% if r.kind == "observational" %}, observational{% endif %})</li>{% endfor %}
+      {% for r in entry.undecided %}<li><strong>{{ r.name }}</strong>: no winner yet
+        <span class="meta">({{ r.status.replace("_", " ") }})</span></li>{% endfor %}
+    </ul>
+    <h3>Changes proposed, and the strategist's ruling</h3>
+    {% for change in entry.changes %}
+    <div class="change">
+      <span class="tag {{ change.decision }}">{{ change.decision }}</span> {{ change.change }}
+      <div class="meta">Why proposed: {{ change.rationale }}</div>
+      {% if change.reason %}<div class="meta">Ruling: {{ change.reason }}</div>{% endif %}
+    </div>
+    {% endfor %}
+    {% elif entry.kind == "strategy" %}
+    <h2>{{ entry.date }} · Strategy check</h2>
+    <div>{{ entry.detail }}</div>
+    {% else %}
+    <h2>{{ entry.date }} · Brand voice</h2>
+    <div>{{ entry.detail }}</div>
+    {% endif %}
+  </section>
+  {% else %}
+  <section><div class="meta">Nothing logged yet. Upload performance data and run an analysis.</div></section>
+  {% endfor %}
+</main>
+</body>
+</html>

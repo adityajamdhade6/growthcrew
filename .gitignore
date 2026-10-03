@@ -1,0 +1,19 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.cache/
+*.db
+*.sqlite3
+.DS_Store
+node_modules/
+# Client brand data stays local.
+workspaces/*
+!workspaces/.gitkeep
+evals/results/
+.secret

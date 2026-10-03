@@ -1,0 +1,36 @@
+# One command: docker compose up --build
+# Then open http://localhost:3000 and sign in with the demo login shown on the page.
+#
+# With no ANTHROPIC_API_KEY the app runs on the sample brand and every model action returns
+# a clear "no key configured" message. Add a key to .env to run the agents for real.
+services:
+  api:
+    build: .
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SEARCH_API_KEY: ${SEARCH_API_KEY:-}
+      # Load the sample brand and demo login on first start. Set to 0 to start empty.
+      GROWTHCREW_DEMO: ${GROWTHCREW_DEMO:-1}
+      # Spending caps: per workspace per week, and for the whole installation.
+      GROWTHCREW_WEEKLY_BUDGET_USD: ${GROWTHCREW_WEEKLY_BUDGET_USD:-25}
+      GROWTHCREW_TOTAL_BUDGET_USD: ${GROWTHCREW_TOTAL_BUDGET_USD:-50}
+      GROWTHCREW_SECRET: ${GROWTHCREW_SECRET:-}
+    volumes:
+      - growthcrew-data:/data
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: ./web
+      args:
+        GROWTHCREW_API_URL: http://api:8000
+        NEXT_PUBLIC_DEMO_EMAIL: demo@growthcrew.test
+        NEXT_PUBLIC_DEMO_PASSWORD: loomhouse-demo-2026
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+volumes:
+  growthcrew-data:
