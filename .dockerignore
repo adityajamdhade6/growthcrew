@@ -1,0 +1,11 @@
+.venv
+.git
+.cache
+.secret
+.env
+*.db
+workspaces
+web
+tests
+evals/results
+**/__pycache__

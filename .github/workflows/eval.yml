@@ -1,0 +1,27 @@
+name: live evals
+
+# The offline evals run in ci.yml on every push. These call the model and cost money, so
+# they only run when started by hand.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Content eval: only the first N golden requests (blank = all 30)"
+        required: false
+
+jobs:
+  eval-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: Live evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: make eval-live LIMIT=${{ inputs.limit }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scorecard-live
+          path: evals/results/scorecard.*

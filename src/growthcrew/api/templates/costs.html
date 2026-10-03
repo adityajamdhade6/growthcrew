@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Costs{% if data.workspace %} · {{ data.workspace }}{% endif %}</title>
+<style>
+  :root { --ink:#1b2333; --muted:#5d6779; --line:#dfe3ea; --bg:#f7f8fa; --card:#fff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink:#e8ebf1; --muted:#9aa4b6; --line:#2c3445; --bg:#12161f; --card:#1a202c; }
+  }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width:860px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-size:1.6rem; margin:0 0 4px; }
+  h2 { font-size:1.05rem; margin:0 0 10px; }
+  p { color:var(--muted); margin:0 0 20px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px;
+            padding:18px 20px; margin-bottom:16px; overflow-x:auto; }
+  .total { font-size:2rem; font-weight:650; font-variant-numeric:tabular-nums; }
+  table { border-collapse:collapse; width:100%; font-size:.9rem; }
+  th, td { text-align:left; padding:6px 10px 6px 0; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; }
+  .note { font-size:.85rem; color:var(--muted); margin:10px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Costs</h1>
+  <p>{{ data.workspace or "All workspaces" }} · model spend only; your review time is not counted.</p>
+
+  <section>
+    <h2>Total model spend</h2>
+    <div class="total">${{ "%.2f"|format(data.total_cost_usd) }}</div>
+    {% if data.calls_without_pricing %}<div class="note">{{ data.calls_without_pricing }} calls had no price configured and are counted as $0.</div>{% endif %}
+  </section>
+
+  <section>
+    <h2>Per agent</h2>
+    <table>
+      <tr><th>Agent</th><th class="n">Calls</th><th class="n">Tokens</th><th class="n">Cost</th></tr>
+      {% for row in data.by_agent %}<tr><td>{{ row.agent }}</td><td class="n">{{ row.calls }}</td>
+        <td class="n">{{ "{:,}".format(row.tokens) }}</td><td class="n">${{ "%.2f"|format(row.cost_usd) }}</td></tr>
+      {% else %}<tr><td colspan="4">No calls logged yet.</td></tr>{% endfor %}
+    </table>
+  </section>
+
+  <section>
+    <h2>Per week</h2>
+    <table>
+      <tr><th>Week of</th><th class="n">Cost</th><th class="n">Pieces written</th><th class="n">Fully loaded cost per piece</th></tr>
+      {% for row in data.by_week %}<tr><td>{{ row.week_start }}</td><td class="n">${{ "%.2f"|format(row.cost_usd) }}</td>
+        <td class="n">{{ row.pieces }}</td>
+        <td class="n">{% if row.fully_loaded_cost_per_piece_usd is not none %}${{ "%.2f"|format(row.fully_loaded_cost_per_piece_usd) }}{% else %}n/a{% endif %}</td></tr>
+      {% endfor %}
+    </table>
+    <div class="note">Fully loaded = everything spent that week, research and strategy included, divided by pieces written.</div>
+  </section>
+
+  <section>
+    <h2>Per piece, against a freelancer</h2>
+    <table>
+      <tr><th>Content type</th><th class="n">Pieces</th><th class="n">Avg model cost</th><th class="n">Your freelancer quotes</th></tr>
+      {% for row in data.by_content_type %}<tr><td>{{ row.content_type }}</td><td class="n">{{ row.pieces }}</td>
+        <td class="n">${{ "%.2f"|format(row.avg_cost_usd) }}</td>
+        <td class="n">{% if row.freelancer_low_usd %}${{ "%.0f"|format(row.freelancer_low_usd) }} to ${{ "%.0f"|format(row.freelancer_high_usd) }}{% else %}not set{% endif %}</td></tr>
+      {% else %}<tr><td colspan="4">No pieces written yet.</td></tr>{% endfor %}
+    </table>
+    <div class="note">Model cost covers the writer and critic calls for the piece only. It leaves out research, strategy and your review time, and a freelancer's fee buys judgement and accountability that this number does not. To compare, add quotes you have actually received to FREELANCER_RATES_USD in config.py.</div>
+  </section>
+
+  <section>
+    <h2>Every piece</h2>
+    <table>
+      <tr><th>Week</th><th>Piece</th><th>Type</th><th class="n">Calls</th><th class="n">Cost</th></tr>
+      {% for row in data.by_piece %}<tr><td>{{ row.week }}</td><td>{{ row.piece }}</td><td>{{ row.content_type }}</td>
+        <td class="n">{{ row.calls }}</td><td class="n">${{ "%.3f"|format(row.cost_usd) }}</td></tr>
+      {% endfor %}
+    </table>
+  </section>
+</main>
+</body>
+</html>

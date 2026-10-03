@@ -1,0 +1,207 @@
+{
+  "_readme": "Labelled guardrail cases. should_block lists the rules that must fire; an empty list means the line must pass.",
+  "cases": [
+    {
+      "id": "g01",
+      "brand": "northfield",
+      "text": "98.6% on-time delivery over the last 24 months.",
+      "should_block": []
+    },
+    {
+      "id": "g02",
+      "brand": "northfield",
+      "text": "We deliver 99.9% of orders on time.",
+      "should_block": [
+        "invented_proof"
+      ]
+    },
+    {
+      "id": "g03",
+      "brand": "northfield",
+      "text": "\"Northfield cut our manifold cost by 18% without a design change\"",
+      "should_block": []
+    },
+    {
+      "id": "g04",
+      "brand": "northfield",
+      "text": "\"Northfield saved our entire company from certain ruin last year\"",
+      "should_block": [
+        "invented_proof"
+      ]
+    },
+    {
+      "id": "g05",
+      "brand": "northfield",
+      "text": "Kestrel Machining is a scam and their parts are garbage.",
+      "should_block": [
+        "competitor_defamation"
+      ]
+    },
+    {
+      "id": "g06",
+      "brand": "northfield",
+      "text": "Unlike Kestrel Machining, we send an inspection report with every shipment.",
+      "should_block": []
+    },
+    {
+      "id": "g07",
+      "brand": "northfield",
+      "text": "ProtoWerk cannot be trusted with tight tolerances.",
+      "should_block": [
+        "competitor_defamation"
+      ]
+    },
+    {
+      "id": "g08",
+      "brand": "northfield",
+      "text": "We are a one-stop shop for machined parts.",
+      "should_block": [
+        "off_brand"
+      ]
+    },
+    {
+      "id": "g09",
+      "brand": "northfield",
+      "text": "Our parts are cheap.",
+      "should_block": [
+        "off_brand"
+      ]
+    },
+    {
+      "id": "g10",
+      "brand": "northfield",
+      "text": "We hold \u00b10.01 mm on production runs.",
+      "should_block": []
+    },
+    {
+      "id": "g11",
+      "brand": "loomhouse",
+      "text": "Linen is clinically proven to improve sleep.",
+      "should_block": [
+        "sensitive_claim"
+      ]
+    },
+    {
+      "id": "g12",
+      "brand": "loomhouse",
+      "text": "Our sheets cure insomnia.",
+      "should_block": [
+        "sensitive_claim"
+      ]
+    },
+    {
+      "id": "g13",
+      "brand": "loomhouse",
+      "text": "Linen treats night sweats and anxiety.",
+      "should_block": [
+        "sensitive_claim"
+      ]
+    },
+    {
+      "id": "g14",
+      "brand": "loomhouse",
+      "text": "Pick a colour and treat the guest room to a refresh.",
+      "should_block": []
+    },
+    {
+      "id": "g15",
+      "brand": "loomhouse",
+      "text": "Treat yourself to new sheets.",
+      "should_block": [
+        "off_brand"
+      ]
+    },
+    {
+      "id": "g16",
+      "brand": "loomhouse",
+      "text": "Sheet sets from $189. Free returns for 60 nights.",
+      "should_block": []
+    },
+    {
+      "id": "g17",
+      "brand": "loomhouse",
+      "text": "Brightside Linen sheets are the worst we have felt.",
+      "should_block": [
+        "competitor_defamation"
+      ]
+    },
+    {
+      "id": "g18",
+      "brand": "loomhouse",
+      "text": "4.8 out of 5 from 2,300 reviews",
+      "should_block": []
+    },
+    {
+      "id": "g19",
+      "brand": "loomhouse",
+      "text": "Rated 4.9 by over 10,000 happy sleepers, a 300% jump.",
+      "should_block": [
+        "invented_proof"
+      ]
+    },
+    {
+      "id": "g20",
+      "brand": "ledgerly",
+      "text": "Guaranteed income every month with Ledgerly.",
+      "should_block": [
+        "sensitive_claim"
+      ]
+    },
+    {
+      "id": "g21",
+      "brand": "ledgerly",
+      "text": "A risk-free way to double your income.",
+      "should_block": [
+        "sensitive_claim"
+      ]
+    },
+    {
+      "id": "g22",
+      "brand": "ledgerly",
+      "text": "Pro is $12 a month, billed monthly.",
+      "should_block": []
+    },
+    {
+      "id": "g23",
+      "brand": "ledgerly",
+      "text": "Ledgerly is the all-in-one platform for freelancers.",
+      "should_block": [
+        "off_brand"
+      ]
+    },
+    {
+      "id": "g24",
+      "brand": "ledgerly",
+      "text": "BillBee is run by crooks who steal from freelancers.",
+      "should_block": [
+        "competitor_defamation"
+      ]
+    },
+    {
+      "id": "g25",
+      "brand": "ledgerly",
+      "text": "BillBee charges per invoice; we charge a flat $12 a month.",
+      "should_block": []
+    },
+    {
+      "id": "g26",
+      "brand": "ledgerly",
+      "text": "Invoices sent with automatic reminders are paid 11 days sooner on average.",
+      "should_block": []
+    },
+    {
+      "id": "g27",
+      "brand": "ledgerly",
+      "text": "We send reminders. We do not guarantee payment.",
+      "should_block": []
+    },
+    {
+      "id": "g28",
+      "brand": "ledgerly",
+      "text": "Freelancers using Ledgerly earn 42% more.",
+      "should_block": [
+        "invented_proof"
+      ]
+    }
+  ]
+}

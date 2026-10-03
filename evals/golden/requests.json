@@ -1,0 +1,461 @@
+{
+  "_readme": "Golden set: 3 fictional brands x 10 content requests. `reference` must be written or approved by a human: paste the text, then set approved_by and approved_on. Items without approved_by are not used as references.",
+  "items": [
+    {
+      "id": "northfield-01",
+      "brand": "northfield",
+      "request": {
+        "content_type": "linkedin_post",
+        "pillar": "Know what a part should cost",
+        "audience": "Sourcing managers at industrial OEMs",
+        "funnel_stage": "awareness",
+        "goal": "Profile visits from procurement roles",
+        "topic": "Why three quotes for the same manifold differ by 40%"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "northfield-02",
+      "brand": "northfield",
+      "request": {
+        "content_type": "linkedin_post",
+        "pillar": "Delivered when we said",
+        "audience": "Heads of procurement",
+        "funnel_stage": "consideration",
+        "goal": "Clicks to the quality page",
+        "topic": "What a late shipment really costs an assembly line"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "northfield-03",
+      "brand": "northfield",
+      "request": {
+        "content_type": "blog_article",
+        "pillar": "Know what a part should cost",
+        "audience": "Sourcing managers researching cost-down",
+        "funnel_stage": "awareness",
+        "goal": "Organic visits for should-cost analysis",
+        "topic": "Should-cost analysis for CNC parts: a buyer's guide"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "northfield-04",
+      "brand": "northfield",
+      "request": {
+        "content_type": "cold_email_sequence",
+        "pillar": "Know what a part should cost",
+        "audience": "Heads of procurement at off-highway OEMs",
+        "funnel_stage": "conversion",
+        "goal": "Replies asking for a should-cost report",
+        "topic": "Free should-cost report on one drawing"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "northfield-05",
+      "brand": "northfield",
+      "request": {
+        "content_type": "ad",
+        "pillar": "Delivered when we said",
+        "audience": "Sourcing managers in Germany and the UK",
+        "funnel_stage": "consideration",
+        "goal": "Clicks to the quality page",
+        "topic": "On-time delivery record",
+        "platform": "google"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "northfield-06",
+      "brand": "northfield",
+      "request": {
+        "content_type": "landing_hero",
+        "pillar": "Know what a part should cost",
+        "audience": "Buyers arriving from the should-cost ad",
+        "funnel_stage": "conversion",
+        "goal": "Should-cost report requests",
+        "topic": "Should-cost report landing page"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "northfield-07",
+      "brand": "northfield",
+      "request": {
+        "content_type": "newsletter",
+        "pillar": "Lower cost without a redesign",
+        "audience": "Existing customers and past enquirers",
+        "funnel_stage": "retention",
+        "goal": "Repeat RFQs",
+        "topic": "Quarterly note: tariff changes and landed cost"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "northfield-08",
+      "brand": "northfield",
+      "request": {
+        "content_type": "x_thread",
+        "pillar": "Know what a part should cost",
+        "audience": "Manufacturing engineers",
+        "funnel_stage": "awareness",
+        "goal": "Follows from engineers",
+        "topic": "How a should-cost model is built, step by step"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "northfield-09",
+      "brand": "northfield",
+      "request": {
+        "content_type": "linkedin_post",
+        "pillar": "Lower cost without a redesign",
+        "audience": "Design and cost engineers",
+        "funnel_stage": "awareness",
+        "goal": "Comments from engineers",
+        "topic": "Cost-down without a design change: where the money actually is"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "northfield-10",
+      "brand": "northfield",
+      "request": {
+        "content_type": "blog_article",
+        "pillar": "Delivered when we said",
+        "audience": "Procurement leads comparing overseas suppliers",
+        "funnel_stage": "consideration",
+        "goal": "Organic visits and RFQs",
+        "topic": "How to audit an overseas machining supplier before the first order"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "loomhouse-01",
+      "brand": "loomhouse",
+      "request": {
+        "content_type": "ad",
+        "pillar": "Sleeps cooler",
+        "audience": "Hot sleepers aged 28 to 45",
+        "funnel_stage": "awareness",
+        "goal": "Clicks to the sheet set page",
+        "topic": "Linen for hot sleepers",
+        "platform": "meta"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "loomhouse-02",
+      "brand": "loomhouse",
+      "request": {
+        "content_type": "landing_hero",
+        "pillar": "Sleeps cooler",
+        "audience": "Visitors from the hot-sleeper ad",
+        "funnel_stage": "conversion",
+        "goal": "Add to cart on sheet sets",
+        "topic": "Sheet set product page hero"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "loomhouse-03",
+      "brand": "loomhouse",
+      "request": {
+        "content_type": "newsletter",
+        "pillar": "Softer every wash",
+        "audience": "Past buyers",
+        "funnel_stage": "retention",
+        "goal": "Repeat purchase of pillowcases",
+        "topic": "How to wash linen so it keeps getting softer"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "loomhouse-04",
+      "brand": "loomhouse",
+      "request": {
+        "content_type": "blog_article",
+        "pillar": "Sleeps cooler",
+        "audience": "People searching linen vs cotton",
+        "funnel_stage": "consideration",
+        "goal": "Organic visits",
+        "topic": "Linen vs cotton sheets: which sleeps cooler"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "loomhouse-05",
+      "brand": "loomhouse",
+      "request": {
+        "content_type": "linkedin_post",
+        "pillar": "Made to last",
+        "audience": "Design-minded homeowners",
+        "funnel_stage": "awareness",
+        "goal": "Profile visits",
+        "topic": "Why we tell customers our sheets wrinkle",
+        "ab_test": false
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "loomhouse-06",
+      "brand": "loomhouse",
+      "request": {
+        "content_type": "x_thread",
+        "pillar": "Made to last",
+        "audience": "People furnishing a first home",
+        "funnel_stage": "awareness",
+        "goal": "Follows",
+        "topic": "What to look for in linen: weight, weave, wash"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "loomhouse-07",
+      "brand": "loomhouse",
+      "request": {
+        "content_type": "ad",
+        "pillar": "Softer every wash",
+        "audience": "Shoppers who viewed a product and left",
+        "funnel_stage": "conversion",
+        "goal": "Purchases",
+        "topic": "60-night trial",
+        "platform": "meta"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "loomhouse-08",
+      "brand": "loomhouse",
+      "request": {
+        "content_type": "newsletter",
+        "pillar": "Sleeps cooler",
+        "audience": "Subscribers who have not bought",
+        "funnel_stage": "conversion",
+        "goal": "First purchase",
+        "topic": "Start of summer: the case for linen"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "loomhouse-09",
+      "brand": "loomhouse",
+      "request": {
+        "content_type": "landing_hero",
+        "pillar": "Made to last",
+        "audience": "Wedding registry visitors",
+        "funnel_stage": "consideration",
+        "goal": "Registry adds",
+        "topic": "Registry landing page hero"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "loomhouse-10",
+      "brand": "loomhouse",
+      "request": {
+        "content_type": "blog_article",
+        "pillar": "Softer every wash",
+        "audience": "Owners searching for linen care",
+        "funnel_stage": "retention",
+        "goal": "Organic visits and repeat purchase",
+        "topic": "How to care for linen bedding"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "ledgerly-01",
+      "brand": "ledgerly",
+      "request": {
+        "content_type": "linkedin_post",
+        "pillar": "Get paid on time",
+        "audience": "Freelance designers and developers",
+        "funnel_stage": "awareness",
+        "goal": "Signups to the free plan",
+        "topic": "The awkwardness of the 'just following up' email"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "ledgerly-02",
+      "brand": "ledgerly",
+      "request": {
+        "content_type": "x_thread",
+        "pillar": "Get paid on time",
+        "audience": "Freelancers on X",
+        "funnel_stage": "awareness",
+        "goal": "Signups",
+        "topic": "A reminder schedule that gets invoices paid without souring the client"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "ledgerly-03",
+      "brand": "ledgerly",
+      "request": {
+        "content_type": "cold_email_sequence",
+        "pillar": "Built for freelancers, not accountants",
+        "audience": "Small studios of 2 to 5 people",
+        "funnel_stage": "conversion",
+        "goal": "Replies and trial starts",
+        "topic": "Replacing the invoicing spreadsheet"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "ledgerly-04",
+      "brand": "ledgerly",
+      "request": {
+        "content_type": "ad",
+        "pillar": "Get paid on time",
+        "audience": "Freelancers searching for invoice software",
+        "funnel_stage": "conversion",
+        "goal": "Free plan signups",
+        "topic": "Automatic payment reminders",
+        "platform": "google"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "ledgerly-05",
+      "brand": "ledgerly",
+      "request": {
+        "content_type": "landing_hero",
+        "pillar": "Ten minutes a week",
+        "audience": "Visitors from the reminders ad",
+        "funnel_stage": "conversion",
+        "goal": "Signups",
+        "topic": "Homepage hero"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "ledgerly-06",
+      "brand": "ledgerly",
+      "request": {
+        "content_type": "blog_article",
+        "pillar": "Get paid on time",
+        "audience": "Freelancers searching how to chase late invoices",
+        "funnel_stage": "awareness",
+        "goal": "Organic visits",
+        "topic": "How to follow up on a late invoice (with wording)"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "ledgerly-07",
+      "brand": "ledgerly",
+      "request": {
+        "content_type": "newsletter",
+        "pillar": "Ten minutes a week",
+        "audience": "Free plan users",
+        "funnel_stage": "conversion",
+        "goal": "Upgrades to Pro",
+        "topic": "What Pro adds, and who does not need it"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "ledgerly-08",
+      "brand": "ledgerly",
+      "request": {
+        "content_type": "linkedin_post",
+        "pillar": "Built for freelancers, not accountants",
+        "audience": "People going full-time freelance",
+        "funnel_stage": "consideration",
+        "goal": "Signups",
+        "topic": "What you actually need from invoicing in year one"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "ledgerly-09",
+      "brand": "ledgerly",
+      "request": {
+        "content_type": "ad",
+        "pillar": "Ten minutes a week",
+        "audience": "Freelancers at tax season",
+        "funnel_stage": "consideration",
+        "goal": "Clicks to pricing",
+        "topic": "Tax season invoicing",
+        "platform": "meta"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    },
+    {
+      "id": "ledgerly-10",
+      "brand": "ledgerly",
+      "request": {
+        "content_type": "blog_article",
+        "pillar": "Built for freelancers, not accountants",
+        "audience": "Freelancers comparing invoicing tools",
+        "funnel_stage": "consideration",
+        "goal": "Organic visits",
+        "topic": "Invoicing app or accounting suite: what a solo freelancer needs"
+      },
+      "reference": "",
+      "approved_by": null,
+      "approved_on": null
+    }
+  ]
+}

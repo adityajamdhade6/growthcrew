@@ -1,0 +1,38 @@
+# Render blueprint for a public demo: sample brand pre-loaded, no API key, hard spending cap.
+# Not yet deployed. To use it: push this repo to GitHub, then in Render choose
+# New > Blueprint and select the repo. Set the web service's GROWTHCREW_API_URL build
+# argument to the API service's internal address once Render has assigned it.
+services:
+  - type: web
+    name: growthcrew-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: GROWTHCREW_DEMO
+        value: "1"
+      # The demo has no ANTHROPIC_API_KEY, so it cannot spend. If you add one, this cap
+      # stops all model calls once total spend reaches it.
+      - key: GROWTHCREW_TOTAL_BUDGET_USD
+        value: "5"
+      - key: GROWTHCREW_WEEKLY_BUDGET_USD
+        value: "2"
+      - key: GROWTHCREW_SECRET
+        generateValue: true
+
+  - type: web
+    name: growthcrew-web
+    runtime: docker
+    dockerfilePath: ./web/Dockerfile
+    dockerContext: ./web
+    envVars:
+      - key: GROWTHCREW_API_URL
+        value: http://growthcrew-api:8000
+      - key: NEXT_PUBLIC_DEMO_EMAIL
+        value: demo@growthcrew.test
+      - key: NEXT_PUBLIC_DEMO_PASSWORD
+        value: loomhouse-demo-2026

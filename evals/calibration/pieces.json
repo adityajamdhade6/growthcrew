@@ -1,0 +1,125 @@
+{
+  "_readme": "20 calibration pieces of deliberately mixed quality, written for the three fictional eval brands. A human scores each 1-10 in human_scores.csv; the judge scores the same pieces; the eval reports agreement.",
+  "pieces": [
+    {
+      "id": "cal-01",
+      "brand": "northfield",
+      "content_type": "linkedin_post",
+      "text": "Three suppliers quoted the same hydraulic manifold last month. The prices were 40% apart.\nNone of them could say why.\nA should-cost model can. It prices the material, the machine time and the finishing line by line, so you know what the part ought to cost before you negotiate.\nWe build one free with a first production order.\nWhat was the widest quote spread you have seen on a single drawing?"
+    },
+    {
+      "id": "cal-02",
+      "brand": "northfield",
+      "content_type": "linkedin_post",
+      "text": "In today's fast-paced world of manufacturing, unlocking savings is a game-changer! Our world-class, best-in-class CNC solutions leverage cutting-edge technology to elevate your supply chain. Contact us today to learn more!!!"
+    },
+    {
+      "id": "cal-03",
+      "brand": "northfield",
+      "content_type": "ad",
+      "text": "Hook: Late parts stop the line.\nPrimary text: 98.6% on-time delivery over the last 24 months. Inspection report with every shipment.\nHeadline: See our delivery record"
+    },
+    {
+      "id": "cal-04",
+      "brand": "northfield",
+      "content_type": "ad",
+      "text": "Hook: Cheap parts fast\nPrimary text: We are 73% cheaper than Kestrel Machining, who are frankly a scam. Trusted by 500+ OEMs.\nHeadline: Get a quote"
+    },
+    {
+      "id": "cal-05",
+      "brand": "northfield",
+      "content_type": "cold_email_sequence",
+      "text": "Email 1 (day 1) subject: What should drawing 4471 cost?\nYou likely have a cost-down target for this year and a few parts where the quotes never made sense.\nSend us one drawing. We will return a line-by-line should-cost model, free, so you can see where the money is.\nWorth a look?\nEmail 2 (day 4) subject: 18% without a design change\nBrenner Hydraulik's head of procurement told us: \"Northfield cut our manifold cost by 18% without a design change\".\nSame offer stands: one drawing, one should-cost model.\nEmail 3 (day 9) subject: Closing the loop\nIf cost-down is not a priority this quarter, no problem. I will not write again unless you ask."
+    },
+    {
+      "id": "cal-06",
+      "brand": "northfield",
+      "content_type": "linkedin_post",
+      "text": "We are a machining company. We make parts. Our parts are good. Our customers like our parts. If you need parts, we can make parts for you. Quality is important to us. Delivery is important to us."
+    },
+    {
+      "id": "cal-07",
+      "brand": "northfield",
+      "content_type": "landing_hero",
+      "text": "Headline: Know what your part should cost\nSubheadline: Send one drawing. We return a line-by-line should-cost model, free with a first production order.\nCTA button: Send a drawing\nPoint: \u00b10.01 mm on production runs\nPoint: Inspection report with every shipment\nSocial proof: \"Forty-one shipments, none late\" (Sourcing Manager, Halden Off-Highway)"
+    },
+    {
+      "id": "cal-08",
+      "brand": "loomhouse",
+      "content_type": "ad",
+      "text": "Hook: Kicked the covers off again?\nPrimary text: Linen stays cool to the touch. Sleep on it for 60 nights; send it back if you do not love it.\nHeadline: Linen sheets from $189"
+    },
+    {
+      "id": "cal-09",
+      "brand": "loomhouse",
+      "content_type": "ad",
+      "text": "Hook: Treat yourself to luxury\nPrimary text: Our premium luxury linen is clinically proven to cure insomnia. Elevate your sleep today!\nHeadline: Shop premium linen"
+    },
+    {
+      "id": "cal-10",
+      "brand": "loomhouse",
+      "content_type": "newsletter",
+      "text": "Subject: Your linen gets softer. Here is how to help it.\nPreview: Cool wash, no softener, and one thing to skip.\nLinen softens as the fibres relax, which takes washing, not chemistry.\nWash cool. Skip fabric softener; it coats the flax and makes it feel waxy.\nTumble dry low, or line dry and shake it out. Yes, it will wrinkle. We think that is the point.\nA customer, Dan K., put it better than we can: \"Softer after every wash, which I did not believe until the tenth\".\nPillowcases wear fastest. If yours are due, they are here."
+    },
+    {
+      "id": "cal-11",
+      "brand": "loomhouse",
+      "content_type": "landing_hero",
+      "text": "Headline: Sleep cooler tonight\nSubheadline: Stonewashed linen sheets, woven from European flax. Try them for 60 nights.\nCTA button: Shop sheet sets\nPoint: Cool to the touch, even in July\nPoint: Softer after every wash\nSocial proof: 4.8 out of 5 from 2,300 reviews"
+    },
+    {
+      "id": "cal-12",
+      "brand": "loomhouse",
+      "content_type": "linkedin_post",
+      "text": "Linen wrinkles.\nWe put that on the product page, above the price.\nReturns dropped, because the people who mind wrinkles stopped buying and the people who like a lived-in bed stopped being surprised.\nTelling customers the drawback first is the cheapest thing we have done for our return rate."
+    },
+    {
+      "id": "cal-13",
+      "brand": "loomhouse",
+      "content_type": "x_thread",
+      "text": "1/ Linen is great.\n2/ It is made from flax.\n3/ Flax is a plant.\n4/ We sell linen.\n5/ Buy our linen."
+    },
+    {
+      "id": "cal-14",
+      "brand": "loomhouse",
+      "content_type": "newsletter",
+      "text": "Subject: BIG NEWS!!! You won't BELIEVE this!!!\nPreview: Open now!!!\nHey there! We are SO excited! Our linen is the best linen in the whole world and Brightside Linen is garbage and their sheets are the worst! Buy now! 97% of people agree! Hurry!!!"
+    },
+    {
+      "id": "cal-15",
+      "brand": "ledgerly",
+      "content_type": "linkedin_post",
+      "text": "You did the work three weeks ago.\nNow you are drafting a fourth version of an email that starts \"just following up\".\nLedgerly sends the polite nudge on day 7 and the firmer one on day 14, so you don't have to write either.\nFree for three invoices a month.\nWhat is the longest a client has made you wait?"
+    },
+    {
+      "id": "cal-16",
+      "brand": "ledgerly",
+      "content_type": "ad",
+      "text": "Hook: Guaranteed income, risk-free\nPrimary text: Ledgerly is the all-in-one platform solution that guarantees you get paid. Double your income.\nHeadline: Financial freedom now"
+    },
+    {
+      "id": "cal-17",
+      "brand": "ledgerly",
+      "content_type": "ad",
+      "text": "Hook: Still chasing that invoice?\nPrimary text: Automatic reminders on day 7 and day 14. Free for 3 invoices a month.\nHeadline: Send an invoice in 2 min"
+    },
+    {
+      "id": "cal-18",
+      "brand": "ledgerly",
+      "content_type": "landing_hero",
+      "text": "Headline: Invoicing software\nSubheadline: Ledgerly is a platform that provides a solution for invoicing needs of various users across multiple industries and use cases.\nCTA button: Learn more\nPoint: Features\nPoint: Benefits"
+    },
+    {
+      "id": "cal-19",
+      "brand": "ledgerly",
+      "content_type": "cold_email_sequence",
+      "text": "Email 1 (day 1) subject: Quick question\nI hope this email finds you well. I wanted to reach out and touch base to circle back on synergies. Our robust, seamless, best-in-class platform empowers freelancers to streamline your workflow. Can we hop on a 45 minute call?\nEmail 2 (day 2) subject: Bumping this\nJust bumping this to the top of your inbox.\nEmail 3 (day 3) subject: Bumping again\nBumping again. Did you see my emails?"
+    },
+    {
+      "id": "cal-20",
+      "brand": "ledgerly",
+      "content_type": "newsletter",
+      "text": "Subject: What Pro adds, and who doesn't need it\nPreview: If you send three invoices a month, stay on Free.\nIf you send three invoices a month or fewer, stay on Free. It does the job.\nPro is $12 a month and adds two things: unlimited invoices, and reminders that send themselves on day 7 and day 14.\nIn our own data, invoices sent with automatic reminders are paid 11 days sooner on average.\nIf chasing payments costs you an hour a month, Pro pays for itself. If it doesn't, it won't.\nSee what's in Pro."
+    }
+  ]
+}

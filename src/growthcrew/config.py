@@ -1,0 +1,109 @@
+"""Central configuration. Swap models, effort and pricing here and nowhere else."""
+
+import os
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Literal
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
+
+# Model IDs, checked against the Anthropic model list on 2026-10-03.
+FABLE = "claude-fable-5-1"
+OPUS = "claude-opus-5-5"
+SONNET = "claude-sonnet-5-5"
+HAIKU = "claude-haiku-4-5"
+
+
+class AgentRole(StrEnum):
+    RESEARCH = "research"
+    STRATEGIST = "strategist"
+    CONTENT = "content"
+    CRITIC = "critic"
+    ANALYST = "analyst"
+    ORCHESTRATOR = "orchestrator"
+    ONBOARDING = "onboarding"
+    VERIFIER = "verifier"
+    JUDGE = "judge"
+
+
+@dataclass(frozen=True)
+class RoleConfig:
+    model: str
+    max_tokens: int = 16000
+    # Haiku 4.5 rejects the effort parameter, so set effort=None when using it.
+    effort: Effort | None = "medium"
+
+
+# Every role starts on Opus 5.5. Change one line to move a role to SONNET or
+# HAIKU once the evals show quality holds.
+AGENT_MODELS: dict[AgentRole, RoleConfig] = {
+    AgentRole.RESEARCH: RoleConfig(model=OPUS, effort="medium"),
+    AgentRole.STRATEGIST: RoleConfig(model=OPUS, max_tokens=20000, effort="high"),
+    AgentRole.CONTENT: RoleConfig(model=OPUS, effort="medium"),
+    AgentRole.CRITIC: RoleConfig(model=OPUS, effort="high"),
+    AgentRole.ANALYST: RoleConfig(model=OPUS, effort="medium"),
+    AgentRole.ORCHESTRATOR: RoleConfig(model=OPUS, effort="low"),
+    AgentRole.ONBOARDING: RoleConfig(model=OPUS, effort="medium"),
+    AgentRole.VERIFIER: RoleConfig(model=OPUS, effort="medium"),
+    # The eval judge. Keep it fixed between runs, or scores are not comparable.
+    AgentRole.JUDGE: RoleConfig(model=OPUS, effort="high"),
+}
+
+
+@dataclass(frozen=True)
+class ModelPrice:
+    """USD per million tokens."""
+
+    input: float
+    output: float
+    cache_read: float
+
+    @property
+    def cache_write(self) -> float:
+        # 5-minute cache writes cost 1.25x base input.
+        return self.input * 1.25
+
+
+PRICING: dict[str, ModelPrice] = {
+    FABLE: ModelPrice(input=10.00, output=50.00, cache_read=0.25),
+    OPUS: ModelPrice(input=4.00, output=20.00, cache_read=0.20),
+    SONNET: ModelPrice(input=2.00, output=10.00, cache_read=0.20),
+    HAIKU: ModelPrice(input=1.00, output=5.00, cache_read=0.10),
+}
+
+# When a safety classifier declines a request, let the API re-run it on a
+# fallback model inside the same call. Cost is logged against the model that
+# actually served the response.
+REFUSAL_FALLBACKS = True
+
+LLM_MAX_ATTEMPTS = 4
+
+# Default spend cap per workspace per week, in USD. Override per workspace via the API.
+WEEKLY_BUDGET_USD = float(os.getenv("GROWTHCREW_WEEKLY_BUDGET_USD", "25"))
+
+# Optional hard cap on all model spend, ever, across every workspace. Set it on a public demo.
+_total = os.getenv("GROWTHCREW_TOTAL_BUDGET_USD")
+TOTAL_BUDGET_USD: float | None = float(_total) if _total else None
+
+# What you have actually been quoted per piece, in USD (low, high), for the cost dashboard.
+# Empty by default: the dashboard makes no comparison until you put real quotes here, e.g.
+#   {"blog_article": (250, 400), "linkedin_post": (60, 120)}
+FREELANCER_RATES_USD: dict[str, tuple[float, float]] = {}
+
+# Hard cap on tool calls in one research run.
+RESEARCH_MAX_TOOL_CALLS = 25
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///growthcrew.db")
+SEARCH_API_KEY = os.getenv("SEARCH_API_KEY", "")
+
+
+def price_for(model: str) -> ModelPrice | None:
+    """Look up pricing, tolerating date-suffixed IDs returned by the API."""
+    if model in PRICING:
+        return PRICING[model]
+    matches = [key for key in PRICING if model.startswith(key)]
+    return PRICING[max(matches, key=len)] if matches else None
