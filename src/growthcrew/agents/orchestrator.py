@@ -20,6 +20,7 @@ from growthcrew.agents.learning_models import ProposedChange, WeeklyLearnings, a
 from growthcrew.agents.research import ResearchAgent, ResearchInput, load_latest_research
 from growthcrew.agents.research_models import ResearchReport
 from growthcrew.agents.strategist import StrategistAgent, StrategyInput, load_latest_strategy
+from growthcrew.analytics import registry
 from growthcrew.brain.store import WORKSPACES_DIR, load_brain
 from growthcrew.db.models import (
     AgentRun,
@@ -241,7 +242,7 @@ class Orchestrator:
             row.reviewed = True
             session.add(row)
             session.commit()
-        accepted = sum(ruling.decision != "rejected" for ruling in rulings)
+        accepted = sum(ruling.decision.startswith("accepted") for ruling in rulings)
         partial = sum(ruling.decision == "accepted_partial" for ruling in rulings)
         note = f" ({partial} in part, to confirm next week)" if partial else ""
         return [
@@ -253,7 +254,8 @@ class Orchestrator:
         with Session(self.engine) as session:
             rows = session.exec(
                 select(ChangeDecision).where(
-                    ChangeDecision.cycle_id == cycle_id, ChangeDecision.decision != "rejected"
+                    ChangeDecision.cycle_id == cycle_id,
+                    ChangeDecision.decision.in_(["accepted", "accepted_partial"]),
                 )
             ).all()
         return [ProposedChange.model_validate_json(row.change_json) for row in rows]
@@ -281,6 +283,12 @@ class Orchestrator:
             records, notes = self.content.produce(item.request, brand, strategy, piece_id, item.day)
             batch.pieces += records
             batch.notes += notes
+            # Variants of one piece are an A/B test: register it before any results exist.
+            angles = [record.angle for record in records if record.angle]
+            registry.register_variants(
+                self.engine, workspace, cycle.id, piece_id, item.request.content_type, angles,
+                records[0].final.metadata.hypothesis if records else "",
+            )  # fmt: skip
         save_batch(batch, self.root)
         with Session(self.engine) as session:
             for piece in batch.pieces:

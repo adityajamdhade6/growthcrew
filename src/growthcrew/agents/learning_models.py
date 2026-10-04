@@ -66,7 +66,8 @@ class WeeklyLearnings(LearningsDraft):
 class Ruling(BaseModel):
     change_id: str
     # accepted_partial: a smaller shift now, confirmed against next week's data.
-    decision: Literal["accepted", "accepted_partial", "rejected"]
+    # held: the test has a winner that damages a guardrail metric, so a person must decide.
+    decision: Literal["accepted", "accepted_partial", "held", "rejected"]
     reason: str
     # A specific risk in acting on this change, or "" if there is none. "One week of data"
     # is a risk; "I am not sure" is not.

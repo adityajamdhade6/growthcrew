@@ -206,6 +206,7 @@ class PerformanceRow(SQLModel, table=True):
     sends: float = 0
     opens: float = 0
     replies: float = 0
+    unsubscribes: float = 0
     spend: float = 0
     uploaded_at: datetime = Field(default_factory=_now)
 
@@ -295,3 +296,18 @@ class RoleModel(SQLModel, table=True):
 
     role: str = Field(primary_key=True)
     model: str
+
+
+class ExperimentRegistration(SQLModel, table=True):
+    """An experiment's pre-registration: what was committed to before it started."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=_now)
+    workspace: str = Field(index=True)
+    cycle_id: int = Field(index=True)
+    # The piece the variants belong to, e.g. "07-day03-ad".
+    experiment: str
+    # A growthcrew.experiments.Preregistration, as JSON. Never edited after the test starts.
+    data: str
+    # The readout from the first judgement at the planned sample. Once set, it is the answer.
+    verdict: str | None = None

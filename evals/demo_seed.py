@@ -14,8 +14,10 @@ from sqlmodel import Session, select
 
 from evals.golden.brands import LOOMHOUSE, research_fixture
 from growthcrew import budget
+from growthcrew.agents.analyst import check as check_learnings
 from growthcrew.agents.learning_models import (
     Finding,
+    LearningsDraft,
     ProposedChange,
     Ruling,
     TargetStatus,
@@ -398,17 +400,22 @@ def main() -> None:
     hero = next(r.id for r in analysis.readouts if r.name == "08-day04-landing_hero")
     posts = next(r.id for r in analysis.readouts if r.name == "linkedin_post by angle")
     changes = [
-        ProposedChange(id="c1", change="Shift 40% of LinkedIn posts to the outcome angle", rationale="Outcome posts drew about twice the click-through", evidence=[posts], expected_effect="Higher post click-through", prefer_angle="outcome", content_type="linkedin_post", share_pct=40),
-        ProposedChange(id="c2", change="Move ad budget to the outcome hook", rationale="It won the A/B test by a clear margin", evidence=[ad], expected_effect="Lower cost per click", prefer_angle="outcome", content_type="ad", share_pct=50),
-        ProposedChange(id="c3", change="Keep the hero test running to 100 sessions per variant", rationale="About 40 sessions each is too few to call", evidence=[hero], expected_effect="A result we can trust", prefer_angle="none", content_type="any", share_pct=0),
+        ProposedChange(change="Move ad budget to the outcome hook", rationale="It won the pre-registered A/B test by a clear margin", evidence=[ad], expected_effect="Lower cost per click", prefer_angle="outcome", content_type="ad", share_pct=50),
+        ProposedChange(change="Register an A/B test of the outcome angle on LinkedIn posts", rationale="Outcome posts drew about twice the click-through, but they were different posts, never a registered test", evidence=[posts], expected_effect="A result we can act on in two weeks", prefer_angle="none", content_type="linkedin_post", share_pct=0),
+        ProposedChange(change="Keep the landing page test running to its planned sample", rationale="About 40 sessions per variant is far short of what was registered", evidence=[hero], expected_effect="A result we can trust", prefer_angle="none", content_type="any", share_pct=0),
     ]  # fmt: skip
-    learnings = WeeklyLearnings(
-        workspace=WORKSPACE, analysis=analysis, changes=changes,
+    draft = LearningsDraft(
+        changes=changes,
         what_worked=[Finding(statement="The outcome hook won the ad test: 1.85% click-through against 1.09% and 1.20%", evidence=[ad], confidence="high"),
-                     Finding(statement="Outcome-angle LinkedIn posts drew about twice the click-through of the others", evidence=[posts], confidence="medium")],
+                     Finding(statement="Outcome-angle LinkedIn posts drew about twice the click-through of the others, in an unregistered comparison", evidence=[posts], confidence="medium")],
         what_didnt=[Finding(statement="The landing page hero test has no result yet at about 40 sessions per variant", evidence=[hero], confidence="low")],
         anomaly_notes=[], vs_targets=[TargetStatus(kpi="Ad click-through rate", target="+25% on baseline", actual="1.85% for the winning hook", status="on_track", note="Baseline is this week")],
     )  # fmt: skip
+    # The same code check the analyst's output goes through: ids, confidence caps, blocks.
+    issues = check_learnings(draft, analysis)
+    learnings = WeeklyLearnings(
+        **draft.model_dump(), workspace=WORKSPACE, analysis=analysis, issues=issues
+    )
 
     now = datetime.now(UTC)
     with Session(engine, expire_on_commit=False) as session:
@@ -422,14 +429,14 @@ def main() -> None:
         said = [
             Ruling(
                 change_id="c1",
-                decision="accepted",
-                reason="The gap is large and consistent across posts",
-            ),
-            Ruling(
-                change_id="c2",
                 decision="rejected",
                 reason="Ads are already A/B tested by angle each week",
                 risk="the result rests on a single week of data",
+            ),
+            Ruling(
+                change_id="c2",
+                decision="accepted",
+                reason="A lead worth a proper test before any shift",
             ),
             Ruling(
                 change_id="c3",
@@ -444,8 +451,8 @@ def main() -> None:
                                        decision=ruling.decision, reason=ruling.reason))  # fmt: skip
         steps = [
             ("research", "done", "14 cited claims from 9 sources; 2 sources not seen in the previous research", [("research", 9, 61200, 5400, 0.41)]),
-            ("strategy_check", "done", "Strategist accepted 3 of 3 changes from last week's learnings (2 in part, to confirm next week)", [("strategist", 1, 8300, 900, 0.05)]),
-            ("content_plan", "done", "5 items planned: ad, LinkedIn post, newsletter, landing page hero, LinkedIn post. Applied from learnings: 1 of 2 eligible pieces moved to the outcome angle", [("content", 1, 6100, 700, 0.04)]),
+            ("strategy_check", "done", "Strategist accepted 3 of 3 changes from last week's learnings (1 in part, to confirm next week)", [("strategist", 1, 8300, 900, 0.05)]),
+            ("content_plan", "done", "5 items planned: ad, LinkedIn post, newsletter, landing page hero, LinkedIn post", [("content", 1, 6100, 700, 0.04)]),
             ("drafting", "done", "7 pieces written in 11 writer and editor rounds", [("content", 11, 70400, 9800, 0.48), ("critic", 11, 52800, 6100, 0.33)]),
             ("critic", "done", "5 of 7 pieces scored 8 or more on every criterion; flagged for the reviewer: Day 3 newsletter; blocked by guardrails: Day 1 ad (pain angle)", [("orchestrator", 0, 0, 0, 0.0)]),
         ]  # fmt: skip

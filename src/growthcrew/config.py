@@ -94,6 +94,17 @@ TOTAL_BUDGET_USD: float | None = float(_total) if _total else None
 #   {"blog_article": (250, 400), "linkedin_post": (60, 120)}
 FREELANCER_RATES_USD: dict[str, tuple[float, float]] = {}
 
+# How A/B tests are pre-registered when the variants are drafted: the primary metric, the rate
+# assumed for planning, and the guardrail metrics. The rates are planning assumptions, not
+# measurements; a workspace's own baseline should replace them once it has one.
+EXPERIMENT_DEFAULTS: dict[str, tuple[str, float, tuple[str, ...]]] = {
+    "ad": ("click-through rate", 0.01, ("cost per click",)),
+    "landing_hero": ("conversion rate", 0.03, ()),
+    "cold_email_sequence": ("reply rate", 0.03, ("unsubscribe rate",)),
+}
+# The smallest relative lift worth detecting, used to plan the sample size.
+EXPERIMENT_MDE = 0.3
+
 # Hard cap on tool calls in one research run.
 RESEARCH_MAX_TOOL_CALLS = 25
 

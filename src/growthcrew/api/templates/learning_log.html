@@ -48,7 +48,7 @@
     <h3>Experiment results</h3>
     <ul>
       {% for r in entry.significant %}<li><strong>{{ r.name }}</strong>: {{ r.winner }} won on {{ r.metric }}
-        (+{{ r.lift_pct }}% over the runner-up, p={{ r.p_value }}{% if r.kind == "observational" %}, observational{% endif %})</li>{% endfor %}
+        (+{{ r.lift_pct }}% over the runner-up, 95% interval {{ r.uncertainty.lift_low_pct }}% to {{ r.uncertainty.lift_high_pct }}%)</li>{% endfor %}
       {% for r in entry.undecided %}<li><strong>{{ r.name }}</strong>: no winner yet
         <span class="meta">({{ r.status.replace("_", " ") }})</span></li>{% endfor %}
     </ul>

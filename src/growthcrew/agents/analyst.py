@@ -59,9 +59,6 @@ def check(draft: LearningsDraft, analysis: Analysis) -> list[str]:
         if not significant and finding.confidence != "low":
             # No significant test behind it: at most a tentative observation.
             finding.confidence = "low"
-        elif significant and all(r.kind == "observational" for r in significant):
-            if finding.confidence == "high":
-                finding.confidence = "medium"
 
     for number, change in enumerate(draft.changes, 1):
         change.id = f"c{number}"
@@ -76,8 +73,8 @@ def check(draft: LearningsDraft, analysis: Analysis) -> list[str]:
         )
         if not backed:
             change.blocked_reason = (
-                f"No significant readout shows '{change.prefer_angle}' winning, so this shift "
-                "cannot be applied"
+                f"No pre-registered test has called '{change.prefer_angle}' the winner, so "
+                "this shift cannot be applied"
             )
             issues.append(f"{change.id}: {change.blocked_reason}")
     if len(draft.changes) != CHANGES:

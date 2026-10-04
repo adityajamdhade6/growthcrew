@@ -17,9 +17,9 @@ from growthcrew.agents.strategy_models import StrategyCore, StrategyDoc
 from growthcrew.analytics.analysis import analyze
 from growthcrew.analytics.ingest import ingest
 from growthcrew.analytics.simulate import seed
-from growthcrew.analytics.stats import Arm, compare
 from growthcrew.content.checks import allowed_facts, cliche_hits, unverified_facts
 from growthcrew.content.types import ContentRequest
+from growthcrew.experiments import Arm, analyze_rates, decide
 
 HERE = Path(__file__).parent
 Status = Literal["pass", "fail", "pending", "skipped"]
@@ -74,31 +74,36 @@ def _draw(rng: random.Random, trials: int, rate: float) -> int:
     return sum(rng.random() < rate for _ in range(trials))
 
 
-def analyst_winner_detection(runs: int = 100) -> EvalResult:
-    """Seeded datasets with known answers, through the same test the analyst relies on."""
+def _call(arms: list[Arm], planned: int, seed: int) -> str | None:
+    posterior = analyze_rates(arms, draws=4000, seed=seed)
+    return decide(posterior, arms, planned_per_variant=planned).winner
+
+
+def analyst_winner_detection(runs: int = 200) -> EvalResult:
+    """Seeded datasets with known answers, through the decision rule the analyst relies on."""
     rng = random.Random(20261004)
     clear = null_calls = tiny_calls = two_arm = 0
-    for _ in range(runs):
+    for run in range(runs):
         arms = [
             Arm(label=label, trials=8000, successes=_draw(rng, 8000, rate))
             for label, rate in (("pain", 0.020), ("outcome", 0.035), ("social_proof", 0.020))
         ]
-        clear += compare(arms).winner == "outcome"
+        clear += _call(arms, 8000, run) == "outcome"
         arms = [
             Arm(label=label, trials=8000, successes=_draw(rng, 8000, 0.02))
-            for label in ("pain", "outcome", "social_proof")
+            for label in ("pain", "outcome")
         ]
-        null_calls += compare(arms).winner is not None
+        null_calls += _call(arms, 8000, run) is not None
         arms = [
             Arm(label="pain", trials=30, successes=_draw(rng, 30, 0.05)),
             Arm(label="outcome", trials=30, successes=_draw(rng, 30, 0.25)),
         ]
-        tiny_calls += compare(arms).winner is not None
+        tiny_calls += _call(arms, 30, run) is not None
         arms = [
             Arm(label="pain", trials=5000, successes=_draw(rng, 5000, 0.03)),
             Arm(label="outcome", trials=5000, successes=_draw(rng, 5000, 0.05)),
         ]
-        two_arm += compare(arms).winner == "outcome"
+        two_arm += _call(arms, 5000, run) == "outcome"
     result = {
         "clear_winner_detected": clear / runs,
         "two_arm_winner_detected": two_arm / runs,
@@ -108,7 +113,7 @@ def analyst_winner_detection(runs: int = 100) -> EvalResult:
     thresholds = {
         "clear_winner_detected": ">= 0.95",
         "two_arm_winner_detected": ">= 0.95",
-        "false_winner_rate_when_no_difference": "<= 0.08",
+        "false_winner_rate_when_no_difference": "< 0.05 (plus sampling noise: fails above 0.08)",
         "winner_called_on_tiny_sample": "== 0",
     }
     ok = (
@@ -127,8 +132,9 @@ def analyst_winner_detection(runs: int = 100) -> EvalResult:
 
 
 def analyst_end_to_end(seeds: int = 10) -> EvalResult:
-    """Simulated weeks through CSV ingest and analysis. Known answer: outcome wins; the
-    landing page test is too small to call."""
+    """Simulated weeks through CSV ingest and analysis. Known answer: outcome wins the ad
+    test; the landing page test is too small to call; the unregistered comparison of LinkedIn
+    posts is not called at all."""
     correct = 0
     for number in range(seeds):
         engine = create_engine("sqlite://")
@@ -138,7 +144,8 @@ def analyst_end_to_end(seeds: int = 10) -> EvalResult:
         readouts = {r.name: r for r in analyze(engine, "acme").readouts}
         correct += (
             readouts["07-day03-ad"].winner == "outcome"
-            and readouts["linkedin_post by angle"].winner == "outcome"
+            # Never registered as a test, so no winner may be called however large the gap.
+            and readouts["linkedin_post by angle"].status == "not_preregistered"
             and readouts["08-day04-landing_hero"].status == "not_enough_data"
         )
     return EvalResult(

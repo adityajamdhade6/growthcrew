@@ -45,7 +45,7 @@ against a pydantic schema, checks the budget, and logs tokens and cost.
 | Strategist | `agents/strategist.py`, `frameworks/` | The brain and the research, as a numbered evidence list | `StrategyDoc`: positioning, jobs to be done, messaging house, 90-day channel plan, five experiments, priorities and KPIs | Each recommendation carries evidence IDs; unknown IDs are stripped and unsupported ones listed. ICE scores and ranking are computed. The budget split must total 100. A devil's-advocate call critiques the draft and the strategist revises once. |
 | Writer | `agents/content.py`, `content/` | The brain, the strategy, a content request | One piece per request (seven types), or three variants by angle for anything A/B tested | Platform length limits. Only proof from the brain may be quoted. |
 | Editor | `agents/critic.py` | The draft, brand voice, proof | Scores on six criteria and line-level edits, for up to three rounds | Banned phrases, length limits and unverified facts cap the relevant score, so the model cannot pass a draft the checks fail. |
-| Analyst | `agents/analyst.py`, `analytics/` | Tables computed from uploaded results | `WeeklyLearnings`: what worked, what did not, three proposed changes | The analyst interprets statistics and never computes them. An angle shift without a significant result behind it is blocked. |
+| Analyst | `agents/analyst.py`, `analytics/`, `experiments/` | Tables computed from uploaded results | `WeeklyLearnings`: what worked, what did not, three proposed changes | The analyst interprets statistics and never computes them. Tests are judged only on their pre-registered metric, at their planned sample, once. An angle shift without a called winner behind it is blocked. |
 | Orchestrator | `agents/orchestrator.py` | Everything above | The weekly cycle | Not a model. A state machine that stops at human approval. |
 
 ### The strategist's ruling on proposed changes
@@ -53,12 +53,30 @@ against a pydantic schema, checks the budget, and logs tokens and cost.
 Each week the strategist rules on the analyst's three changes. The model gives a view; the
 rule in `decide_rulings` has the last word:
 
-- A change backed by a significant A/B test whose winner is the angle being shifted to is
-  **accepted by default**.
+- A change backed by a pre-registered A/B test that called the angle being shifted to as its
+  winner is **accepted by default**.
 - If a specific risk is stated (one week of data, an unproven claim in the winning variant),
   it becomes a **partial shift**: half the proposed share, flagged to confirm next week.
-- A win seen only across different pieces, not in a controlled test, is always partial.
-- A change the statistics do not support is blocked and cannot be accepted.
+- A winner that damages a guardrail metric is **held** for the owner to decide.
+- A comparison that was never registered has no winner, so a shift resting on it is blocked.
+
+## The experiment engine
+
+`experiments/` is a standalone package (numpy and pydantic only; it imports nothing else from
+GrowthCrew). See [experiments.md](experiments.md) for the reasoning.
+
+| Module | Does |
+|---|---|
+| `bayes.py` | Posterior for rates (Beta-Binomial) and revenue per visitor (Bayesian bootstrap): probability each variant is best, lift with a 95% interval, expected loss |
+| `decide.py` | The rule: winner, keep running (with how much more data), or no clear difference |
+| `prereg.py` | Pre-registration, and `judge`, which refuses any metric but the registered one |
+| `power.py` | Sample size and power for planning |
+| `bandit.py` | Thompson-sampling budget split with a 10% floor while undecided |
+| `guardrails.py` | Flags a winner that damages a registered guardrail metric |
+| `simulate.py` | Synthetic experiments with known true rates |
+
+`analytics/registry.py` stores registrations and final verdicts, and registers each A/B-tested
+piece as it is drafted. `analytics/analysis.py` builds the readouts.
 
 ## The weekly cycle
 
@@ -94,9 +112,10 @@ restart or the budget resumes from the stage it stopped at.
 5. **Out.** Approved text is exported (calendar CSV, plain text, `.eml` drafts). Publishing is
    done by the owner and recorded with the live link.
 6. **Back.** Uploaded rows are matched to pieces by tracking key, link or opening text.
-   `analytics/` computes rates by pillar, angle, format and channel, runs a significance test
-   on each experiment, and attaches the uncertainty: the probability each variant is best, a
-   95% interval on the lift, and the sample size.
+   `analytics/` computes rates by pillar, angle, format and channel, and judges each
+   pre-registered experiment through `experiments/`: the probability each variant is best, a
+   95% interval on the lift, the expected loss, guardrail flags, and for ads the budget split
+   for next week.
 7. **Learn.** The analyst proposes changes, the strategist's ruling is logged, accepted shifts
    alter the next plan, and recurring human edits become brand voice rules.
 
@@ -126,6 +145,7 @@ columns added at startup; there is no migration tool yet.
 | `Draft`, `Approval`, `CalendarItem` | Drafts with their history, each human decision with its diff, and the schedule |
 | `ContentRevision`, `GuardrailBlock` | Every editor round and every guardrail block |
 | `PerformanceRow` | Normalised rows from uploaded analytics exports |
+| `ExperimentRegistration` | Each test's pre-registration and, once judged at its planned sample, its final verdict |
 | `Learnings`, `ChangeDecision` | Weekly learnings and the strategist's ruling on each change |
 | `BrainVersion`, `EditPattern` | Which brain fields changed, and edit patterns on their way to becoming voice rules |
 | `User`, `WorkspaceBudget`, `RoleModel`, `Alert` | Sign-in and workspace access, spending limits, model choices, alerts |
