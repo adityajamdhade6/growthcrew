@@ -192,6 +192,7 @@ export function statusTone(status: string): Tone {
   if (["approved", "published", "measured", "done", "significant", "accepted", "confirmed"].includes(status))
     return "good";
   if (["rejected", "blocked", "failed"].includes(status)) return "bad";
-  if (["pending_approval", "pending", "running", "scheduled", "inferred"].includes(status)) return "warn";
+  if (["pending_approval", "pending", "running", "scheduled", "inferred", "accepted_partial"].includes(status))
+    return "warn";
   return "neutral";
 }

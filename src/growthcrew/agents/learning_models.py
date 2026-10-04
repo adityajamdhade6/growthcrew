@@ -65,8 +65,13 @@ class WeeklyLearnings(LearningsDraft):
 
 class Ruling(BaseModel):
     change_id: str
-    decision: Literal["accepted", "rejected"]
+    # accepted_partial: a smaller shift now, confirmed against next week's data.
+    decision: Literal["accepted", "accepted_partial", "rejected"]
     reason: str
+    # A specific risk in acting on this change, or "" if there is none. "One week of data"
+    # is a risk; "I am not sure" is not.
+    risk: str = ""
+    confirm_next_week: bool = False
 
 
 class Rulings(BaseModel):

@@ -236,7 +236,10 @@ def test_strategist_rulings_are_logged_and_a_blocked_change_cannot_be_accepted(l
     with Session(engine) as session:
         decisions = session.exec(select(ChangeDecision).order_by(ChangeDecision.id)).all()
         assert session.exec(select(Learnings)).one().reviewed is True
-    assert [d.decision for d in decisions] == ["accepted", "rejected", "accepted"]
+    # The LinkedIn win is observational, so it is accepted in part and confirmed next week.
+    assert [d.decision for d in decisions] == ["accepted_partial", "rejected", "accepted"]
+    assert "not a controlled test" in decisions[0].reason
+    assert json.loads(decisions[0].change_json)["share_pct"] == 20
     assert decisions[1].reason.startswith("Overruled by the statistical check")
     assert all(d.cycle_id == cycle.id and d.reason for d in decisions)
 
@@ -246,9 +249,11 @@ def test_next_weeks_plan_shifts_toward_the_winning_angle(loop, engine):
     with Session(engine) as session:
         plan = BatchPlan.model_validate_json(session.get(Cycle, cycle.id).state_json)
         tasks = {t.stage: t for t in session.exec(select(Task).where(Task.cycle_id == cycle.id))}
-    assert [item.request.angle for item in plan.items] == ["outcome", "outcome", None, None, None]
-    assert "2 of 5 eligible pieces moved to the outcome angle" in tasks["content_plan"].detail
+    # A partial shift: 20% of five LinkedIn posts is one post.
+    assert [item.request.angle for item in plan.items] == ["outcome", None, None, None, None]
+    assert "1 of 5 eligible pieces moved to the outcome angle" in tasks["content_plan"].detail
     assert "accepted 2 of 3 changes" in tasks["strategy_check"].detail
+    assert "(1 in part, to confirm next week)" in tasks["strategy_check"].detail
 
 
 def test_learning_log_shows_what_changed_and_why(loop, engine):
@@ -262,10 +267,11 @@ def test_learning_log_shows_what_changed_and_why(loop, engine):
 
     week = next(entry for entry in entries if entry["kind"] == "learnings")
     assert [change["decision"] for change in week["changes"]] == [
-        "accepted",
+        "accepted_partial",
         "rejected",
         "accepted",
     ]
+    assert week["changes"][0]["applied_share_pct"] == 20
     assert {r["winner"] for r in week["significant"]} == {"outcome"}
     assert any(entry["kind"] == "strategy" for entry in entries)
 

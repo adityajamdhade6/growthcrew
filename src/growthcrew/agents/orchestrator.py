@@ -35,6 +35,7 @@ from growthcrew.db.models import (
 )
 from growthcrew.db.session import get_engine
 from growthcrew.llm import LLM
+from growthcrew.naming import display, piece_name, plural
 from growthcrew.reports.content import save_batch
 from growthcrew.reports.strategy import save_strategy
 from growthcrew.workflow import STAGES
@@ -222,8 +223,8 @@ class Orchestrator:
         if pending is None:
             return []
         learnings = WeeklyLearnings.model_validate_json(pending.data)
-        rulings = self.strategist.review_changes(learnings, strategy, cycle.workspace)
-        changes = {change.id: change for change in learnings.changes}
+        rulings, applied = self.strategist.review_changes(learnings, strategy, cycle.workspace)
+        changes = {change.id: change for change in applied}
         with Session(self.engine) as session:
             for ruling in rulings:
                 session.add(
@@ -240,16 +241,19 @@ class Orchestrator:
             row.reviewed = True
             session.add(row)
             session.commit()
-        accepted = sum(ruling.decision == "accepted" for ruling in rulings)
+        accepted = sum(ruling.decision != "rejected" for ruling in rulings)
+        partial = sum(ruling.decision == "accepted_partial" for ruling in rulings)
+        note = f" ({partial} in part, to confirm next week)" if partial else ""
         return [
-            f"Strategist accepted {accepted} of {len(rulings)} changes from last week's learnings"
+            f"Strategist accepted {accepted} of {plural(len(rulings), 'change')} from last "
+            f"week's learnings{note}"
         ]
 
     def _accepted_changes(self, cycle_id: int) -> list[ProposedChange]:
         with Session(self.engine) as session:
             rows = session.exec(
                 select(ChangeDecision).where(
-                    ChangeDecision.cycle_id == cycle_id, ChangeDecision.decision == "accepted"
+                    ChangeDecision.cycle_id == cycle_id, ChangeDecision.decision != "rejected"
                 )
             ).all()
         return [ProposedChange.model_validate_json(row.change_json) for row in rows]
@@ -260,8 +264,8 @@ class Orchestrator:
         strategy = load_latest_strategy(workspace, self.root)
         plan = self.content.plan_batch(brand, strategy, weeks=1, max_items=self.max_items)
         shifts = apply_changes(plan, self._accepted_changes(cycle.id))
-        kinds = ", ".join(item.request.content_type for item in plan.items)
-        detail = f"{len(plan.items)} items planned: {kinds}"
+        kinds = ", ".join(display(item.request.content_type, capital=False) for item in plan.items)
+        detail = f"{plural(len(plan.items), 'item')} planned: {kinds}"
         if shifts:
             detail += ". Applied from learnings: " + "; ".join(shifts)
         return detail, None, plan.model_dump_json()
@@ -303,7 +307,10 @@ class Orchestrator:
                 )
             session.commit()
         rounds = sum(len(piece.versions) for piece in batch.pieces)
-        return f"{len(batch.pieces)} pieces written in {rounds} writer/critic rounds"
+        return (
+            f"{plural(len(batch.pieces), 'piece')} written in "
+            f"{plural(rounds, 'writer and editor round')}"
+        )
 
     def _critic(self, cycle: Cycle):
         """Quality gate. The critic already scored each piece during drafting; this sums it up."""
@@ -311,11 +318,14 @@ class Orchestrator:
             drafts = session.exec(select(Draft).where(Draft.cycle_id == cycle.id)).all()
         if not drafts:
             raise RuntimeError("Drafting produced no pieces")
-        failed = [draft.piece_id for draft in drafts if not draft.passed_critic]
-        detail = f"{len(drafts) - len(failed)} of {len(drafts)} pieces scored 8+ on every criterion"
+        failed = [piece_name(draft.piece_id) for draft in drafts if not draft.passed_critic]
+        detail = (
+            f"{len(drafts) - len(failed)} of {plural(len(drafts), 'piece')} scored 8 or more "
+            "on every criterion"
+        )
         if failed:
             detail += f"; flagged for the reviewer: {', '.join(failed)}"
-        blocked = [draft.piece_id for draft in drafts if draft.status == "blocked"]
+        blocked = [piece_name(draft.piece_id) for draft in drafts if draft.status == "blocked"]
         if blocked:
             detail += f"; blocked by guardrails: {', '.join(blocked)}"
         return detail

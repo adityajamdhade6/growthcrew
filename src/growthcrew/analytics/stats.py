@@ -1,6 +1,7 @@
 """Significance testing for experiment readouts. Pure functions, no model involved."""
 
 import math
+import random
 from typing import Literal
 
 from pydantic import BaseModel
@@ -77,3 +78,46 @@ def compare(arms: list[Arm]) -> Comparison:
         status="no_significant_difference", p_value=worst_p,
         note=f"'{best.label}' leads but the difference could be chance (p={worst_p:.2f})",
     )  # fmt: skip
+
+
+class Uncertainty(BaseModel):
+    """How sure a readout is, shown with every result so "wins" is never a bare label."""
+
+    leader: str
+    # Probability each variant has the highest true rate (Beta posterior, uniform prior).
+    prob_best: dict[str, float]
+    # 95% credible interval on the leader's relative lift over the runner-up, in percent.
+    lift_low_pct: float | None
+    lift_high_pct: float | None
+    # Total trials across variants.
+    sample_size: int
+
+
+def uncertainty(arms: list[Arm], draws: int = 10_000, seed: int = 0) -> Uncertainty:
+    """Posterior probability that each arm is best, and an interval on the leader's lift.
+
+    Monte Carlo with a fixed seed, so the same data always gives the same numbers.
+    """
+    rng = random.Random(seed)
+    ranked = sorted(arms, key=lambda arm: -arm.rate)
+    leader, runner_up = ranked[0], ranked[1]
+    wins = dict.fromkeys((arm.label for arm in arms), 0)
+    lifts = []
+    for _ in range(draws):
+        sample = {
+            arm.label: rng.betavariate(1 + arm.successes, 1 + arm.trials - arm.successes)
+            for arm in arms
+        }
+        wins[max(sample, key=sample.get)] += 1
+        if sample[runner_up.label] > 0:
+            lifts.append((sample[leader.label] / sample[runner_up.label] - 1) * 100)
+    lifts.sort()
+    low = lifts[int(0.025 * len(lifts))] if lifts else None
+    high = lifts[int(0.975 * len(lifts)) - 1] if lifts else None
+    return Uncertainty(
+        leader=leader.label,
+        prob_best={label: round(count / draws, 4) for label, count in wins.items()},
+        lift_low_pct=round(low, 1) if low is not None else None,
+        lift_high_pct=round(high, 1) if high is not None else None,
+        sample_size=sum(arm.trials for arm in arms),
+    )

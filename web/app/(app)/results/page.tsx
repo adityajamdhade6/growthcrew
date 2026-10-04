@@ -8,7 +8,8 @@ import { Badge, Button, Card, Empty, ErrorState, Loading, Notice, PageHeader, Se
 
 type Row = { id: string; dimension: string; value: string; metric: string; pieces: number; trials: number; successes: number; rate_pct: number };
 type Arm = { label: string; trials: number; successes: number; rate_pct: number };
-type Readout = { id: string; kind: string; name: string; metric: string; arms: Arm[]; status: string; winner: string | null; p_value: number | null; lift_pct: number | null; note: string };
+type Uncertainty = { leader: string; prob_best: Record<string, number>; lift_low_pct: number | null; lift_high_pct: number | null; sample_size: number };
+type Readout = { id: string; kind: string; name: string; title: string; uncertainty: Uncertainty; metric: string; arms: Arm[]; status: string; winner: string | null; p_value: number | null; lift_pct: number | null; note: string };
 type Analysis = {
   window_start: string | null;
   window_end: string | null;
@@ -94,20 +95,27 @@ function Performance({ rows }: { rows: Row[] }) {
 
 function ReadoutCard({ readout }: { readout: Readout }) {
   const tooEarly = readout.status === "not_enough_data";
+  const u = readout.uncertainty;
   const smallest = [...readout.arms].sort((a, b) => a.trials - b.trials)[0];
   const leader = [...readout.arms].sort((a, b) => b.rate_pct - a.rate_pct)[0];
-  const verdict = readout.status === "significant" ? `${label(readout.winner!)} wins` : readout.status === "not_enough_data" ? "Not enough data yet" : "No real difference";
+  const verdict = readout.status === "significant" ? `${label(readout.winner!)} ${readout.kind === "ab_test" ? "wins" : "leads"}` : readout.status === "not_enough_data" ? "Not enough data yet" : "No real difference";
   return (
     <Card>
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
-          <p className="font-medium">{readout.kind === "ab_test" ? "A/B test" : "Comparison"}: {readout.name.replace(/^\d+-day\d+-/, "").split(" by ").map((part, index) => (index ? part : label(part))).join(" by ")}</p>
+          <p className="font-medium">{readout.kind === "ab_test" ? "A/B test" : "Comparison"}: {readout.title}</p>
           <p className="text-xs text-muted">{label(readout.metric)}{readout.kind === "observational" && " · different pieces, so treat as a lead, not proof"}</p>
         </div>
         <Badge tone={readout.status === "significant" ? "good" : readout.status === "not_enough_data" ? "warn" : "neutral"}>{verdict}</Badge>
       </div>
       <Bars muted={tooEarly} rows={readout.arms.map((arm) => ({ label: label(arm.label), value: arm.rate_pct, detail: `${arm.successes.toLocaleString()} of ${arm.trials.toLocaleString()}`, mark: arm.label === readout.winner ? "Winner" : undefined }))} />
-      <p className="mt-3 text-sm text-muted">
+      {/* Uncertainty is shown with every verdict, so "wins" is never a bare label. */}
+      <p className="mt-3 text-sm tabular-nums">
+        {u.prob_best[u.leader] > 0.999 ? "Over 99.9" : Math.round(u.prob_best[u.leader] * 100)}% probability that {label(u.leader).toLowerCase()} is best
+        {u.lift_low_pct !== null && ` · lift ${u.lift_low_pct > 0 ? "+" : ""}${Math.round(u.lift_low_pct)}% to ${u.lift_high_pct! > 0 ? "+" : ""}${Math.round(u.lift_high_pct!)}% (95% interval)`}
+        {` · sample ${u.sample_size.toLocaleString()}`}
+      </p>
+      <p className="mt-1 text-sm text-muted">
         {readout.status === "significant"
           ? `${readout.lift_pct}% better than the runner-up. The chance this is a fluke is ${readout.p_value! < 0.001 ? "under 0.1%" : `${(readout.p_value! * 100).toFixed(1)}%`}.`
           : tooEarly
