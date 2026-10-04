@@ -34,9 +34,15 @@ const NAMES: Record<string, string> = {
   cold_email_sequence: "Cold email sequence",
   blog_article: "Blog article",
   pending_approval: "Needs your approval",
+  accepted_partial: "Accepted in part",
+  social_proof: "Social proof",
+  ai_cliche: "No clichés",
 };
 
 export const label = (value: string) =>
   NAMES[value] ?? value.replace(/[_.]/g, " ").replace(/^\w/, (letter) => letter.toUpperCase());
+
+export const plural = (count: number, word: string) =>
+  `${count.toLocaleString()} ${word}${count === 1 ? "" : "s"}`;
 
 export const money = (value: number) => `$${value.toFixed(2)}`;

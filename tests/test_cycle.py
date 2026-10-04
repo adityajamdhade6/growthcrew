@@ -134,7 +134,11 @@ def test_cycle_runs_automated_stages_and_stops_for_approval(setup, engine):
     drafting = data["steps"][3]["agents"]
     assert {run["agent"]: run["cost_usd"] for run in drafting} == {"content": 0.6, "critic": 0.4}
     assert data["total_cost_usd"] == pytest.approx(0.5 + 0.8 + 0.1 + 0.6 + 0.4)
-    assert "1 of 2 pieces scored 8+" in data["steps"][4]["detail"]
+    assert data["steps"][4]["detail"] == (
+        "1 of 2 pieces scored 8 or more on every criterion; "
+        "flagged for the reviewer: Day 4 newsletter"
+    )
+    assert data["steps"][2]["detail"] == "2 items planned: LinkedIn post, newsletter"
     assert [d["passed_critic"] for d in data["awaiting_approval"]] == [True, False]
 
     with Session(engine) as session:
