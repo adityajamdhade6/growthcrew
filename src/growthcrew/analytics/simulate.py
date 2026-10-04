@@ -16,7 +16,9 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import Engine
 from sqlmodel import Session
 
+from growthcrew.analytics import registry
 from growthcrew.db.models import CalendarItem, Cycle, Draft
+from growthcrew.experiments import GuardrailSpec, preregister
 
 WEEK_END = datetime(2026, 9, 27, tzinfo=UTC)
 LINKEDIN_CTR = {"pain": 0.020, "outcome": 0.045, "social_proof": 0.022}
@@ -84,6 +86,23 @@ def seed(engine: Engine, workspace: str = "acme", rng_seed: int = 7) -> dict[str
             )
             drafts.append(draft)
         session.commit()
+        cycle_id = cycle.id
+
+    # Both A/B tests were registered before they ran: what is being tested, on which metric,
+    # and how much data is needed.
+    registry.register(engine, workspace, cycle_id, preregister(
+        experiment="07-day03-ad", primary_metric="click-through rate",
+        hypothesis="If the ad leads with the outcome, then click-through will beat the pain and "
+        "social-proof hooks because it is the most quoted benefit",
+        variants=list(AD_CTR), baseline_rate=0.012, minimum_detectable_effect=0.4,
+        guardrails=[GuardrailSpec(metric="cost per click")],
+    ))  # fmt: skip
+    registry.register(engine, workspace, cycle_id, preregister(
+        experiment="08-day04-landing_hero", primary_metric="conversion rate",
+        hypothesis="If the hero leads with the pain, then sign-ups will rise because visitors "
+        "arrive with that problem in mind",
+        variants=list(HERO), baseline_rate=0.05, minimum_detectable_effect=0.3,
+    ))  # fmt: skip
 
     linkedin = ["Post title,Post link,Created date,Impressions,Clicks,Reactions"]
     ads = ["Reporting starts,Ad name,Impressions,Link clicks,Amount spent (USD)"]

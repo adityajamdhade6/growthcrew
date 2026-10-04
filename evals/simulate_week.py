@@ -31,14 +31,29 @@ def main() -> None:
                   f"{row.successes:>4}/{row.trials:<6} = {row.rate_pct}%")  # fmt: skip
     print("\nExperiment readouts")
     for r in analysis.readouts:
-        arms = ", ".join(f"{a['label']} {a['successes']}/{a['trials']} ({a['rate_pct']}%)"
-                         for a in r.arms)  # fmt: skip
-        print(f"  {r.id} [{r.kind}] {r.name}\n     {arms}")
+        u = r.uncertainty
+        arms = ", ".join(
+            f"{a['label']} {a['successes']}/{a['trials']} ({a['rate_pct']}%, "
+            f"P(best) {u.prob_best[a['label']]:.1%}, "
+            f"expected loss {u.expected_loss_pct[a['label']]}%)"
+            for a in r.arms
+        )
+        print(f"  {r.id} [{r.kind}] {r.title}\n     {arms}")
+        print(
+            f"     lift of {u.leader} over the runner-up: {r.lift_pct:+.0f}% "
+            f"(95% interval {u.lift_low_pct:+.0f}% to {u.lift_high_pct:+.0f}%)"
+        )
         if r.status == "significant":
-            print(f"     -> SIGNIFICANT: {r.winner} wins, +{r.lift_pct}% over runner-up, "
-                  f"adjusted p={r.p_value}")  # fmt: skip
+            print(f"     -> WINNER: {r.winner}. {r.note}")
+        elif r.status == "not_enough_data":
+            print(f"     -> KEEP RUNNING: about {r.more_needed:,} more trials. {r.note}")
         else:
             print(f"     -> {r.status.upper()}: {r.note}")
+        if r.next_split:
+            split = ", ".join(f"{k} {v:.0%}" for k, v in r.next_split.items())
+            print(f"     next week's budget split: {split}")
+        for flag in r.guardrail_flags:
+            print(f"     GUARDRAIL: {flag}")
     print("\nAnomalies")
     for a in analysis.anomalies:
         print(f"  {a.id} {a.series} on {a.date}: {a.value:.0f} vs typical {a.typical:.0f} "

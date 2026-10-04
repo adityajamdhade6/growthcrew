@@ -19,6 +19,7 @@ dependencies = [
     "fpdf2>=2.8.9",
     "markdown>=3.11",
     "streamlit>=1.65.0",
+    "numpy>=2.4.6",
 ]
 
 [project.scripts]
@@ -29,6 +30,7 @@ dev = [
     "pytest",
     "pytest-cov>=7.1.0",
     "ruff",
+    "vl-convert-python>=1.9.0.post1",
 ]
 
 [build-system]
@@ -66,3 +68,5 @@ extend-immutable-calls = ["fastapi.Depends"]
 "tests/test_hardening.py" = ["E501"]
 "streamlit_app.py" = ["E501"]
 "tests/test_decision_rule.py" = ["E501"]
+"tests/test_experiments.py" = ["E501"]
+"evals/experiments_report.py" = ["E501"]

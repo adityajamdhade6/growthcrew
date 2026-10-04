@@ -87,6 +87,7 @@ STATUS_BADGE = {
 DECISIONS = {
     "accepted": ("Accepted", "green"),
     "accepted_partial": ("Accepted in part", "orange"),
+    "held": ("Held for the owner", "red"),
     "rejected": ("Rejected", "red"),
     "pending": ("Awaiting a ruling", "gray"),
 }
@@ -362,7 +363,7 @@ with results:
     st.altair_chart(
         bar_chart(
             [{"label": display(row.value), "value": row.rate_pct, "highlight": row.value in winners,
-              "text": f"{row.rate_pct:.2f}%" + (" · winner" if row.value in winners else "")}
+              "text": f"{row.rate_pct:.2f}%" + (" · won its test" if row.value in winners else "")}
              for row in angles],
             "Click-through rate (%)",
         ),
@@ -373,36 +374,44 @@ with results:
     )
 
     st.subheader("Experiment results")
+    st.caption(
+        "Bayesian readouts. A winner is called only for a test that was registered before it ran, "
+        "once its planned sample is in, when the leader is very likely the best and choosing it "
+        "risks almost nothing."
+    )
     for readout in readouts:
         u = readout.uncertainty
         leader = display(u.leader)
         unit = {"click-through rate": "impression", "conversion rate": "session"}.get(
             readout.metric, "send"
         )
-        facts = (
-            f"{chance(u.prob_best[u.leader])} probability that {leader.lower()} is the best variant · "
-            f"lift over the runner-up {readout.lift_pct or 0:+.0f}% "
-            f"(95% interval {u.lift_low_pct:+.0f}% to {u.lift_high_pct:+.0f}%) · "
-            f"sample: {plural(u.sample_size, unit)}"
-        )
         kind = "A/B test" if readout.kind == "ab_test" else "Comparison across different pieces"
         with st.container(border=True):
             st.markdown(f"**{readout.title}** · {kind} · {readout.metric}")
-            if readout.status == "significant" and readout.kind == "ab_test":
-                st.badge(f"{leader} wins", color="green")
+            if readout.status == "significant" and readout.guardrail_flags:
+                st.badge(f"{leader} wins, but held: it hurts a guardrail", color="red")
             elif readout.status == "significant":
-                st.badge(f"{leader} leads · not a controlled test", color="blue")
+                st.badge(f"{leader} wins", color="green")
             elif readout.status == "not_enough_data":
-                st.badge("Too early to call", color="orange")
+                st.badge("Keep running", color="orange")
+            elif readout.status == "not_preregistered":
+                st.badge("Descriptive only · not pre-registered", color="blue")
             else:
-                st.badge("No real difference", color="gray")
+                st.badge("No clear difference", color="gray")
+
+            zero = " (includes zero)" if u.lift_low_pct < 0 < u.lift_high_pct else ""
+            st.markdown(
+                f"{chance(u.prob_best[u.leader])} probability that {leader.lower()} is the best variant · "
+                f"lift over the runner-up {readout.lift_pct:+.0f}% "
+                f"(95% interval {u.lift_low_pct:+.0f}% to {u.lift_high_pct:+.0f}%{zero}) · "
+                f"sample: {plural(u.sample_size, unit)}"
+            )
             if readout.status == "not_enough_data":
-                facts = (
-                    f"{chance(u.prob_best[u.leader])} probability that {leader.lower()} is the best variant · "
-                    f"95% interval on its lift: {u.lift_low_pct:+.0f}% to {u.lift_high_pct:+.0f}%, which "
-                    f"includes zero · sample: only {plural(u.sample_size, unit)}"
-                )
-            st.markdown(facts)
+                st.markdown(f"About **{plural(readout.more_needed, 'more ' + unit)}** needed before a call. "
+                            f"Planned: {readout.planned_per_variant:,} per variant.")  # fmt: skip
+            for flag in readout.guardrail_flags:
+                st.error(f"Guardrail: {flag}")
+
             st.altair_chart(
                 bar_chart(
                     [{"label": display(arm["label"]), "value": arm["rate_pct"],
@@ -415,10 +424,30 @@ with results:
                 ),
                 width="stretch",
             )  # fmt: skip
-            if readout.kind == "observational":
-                st.caption(
-                    "Different pieces differ in topic and timing, so treat this as a lead to confirm."
+            st.dataframe(
+                [{"Variant": display(arm["label"]),
+                  "Probability it is best": chance(u.prob_best[arm["label"]]) if u.prob_best[arm["label"]] >= 0.001 else "Under 0.1%",
+                  "Expected loss if chosen": f"{u.expected_loss_pct[arm['label']]:.1f}% of the rate"}
+                 for arm in readout.arms],
+                hide_index=True, width="stretch",
+            )  # fmt: skip
+            if readout.next_split:
+                split = " · ".join(
+                    f"{display(label)} {share:.0%}" for label, share in readout.next_split.items()
                 )
+                st.markdown(
+                    f"**Next week's budget split** (Thompson sampling, 10% floor while undecided): {split}"
+                )
+            if readout.preregistered:
+                with st.expander("What was pre-registered"):
+                    st.markdown(
+                        f"**Hypothesis:** {readout.hypothesis}  \n"
+                        f"**Primary metric:** {readout.metric}  \n"
+                        f"**Planned sample:** {readout.planned_per_variant:,} per variant  \n"
+                        f"**Guardrails:** {', '.join(readout.guardrails_checked) or 'none'}"
+                    )
+            else:
+                st.caption(readout.note)
 
     st.subheader("Learning log")
     st.caption("Each week the analyst proposes changes and the strategist rules on each. A confident "
@@ -533,7 +562,9 @@ with how_tab:
         "| Publish anything | Every draft waits for a named person's approval. |\n"
         "| Use an invented statistic or testimonial | Anything not in the brand's own proof blocks the draft. |\n"
         "| Make an uncited market claim | Claims whose source the agent never read are deleted. |\n"
-        "| Call a winner on a tiny sample | A significance test with a minimum sample; below it, “too early to call”. |\n"
+        "| Call a winner early or on a cherry-picked metric | Tests are pre-registered; nothing is called "
+        "before the planned sample, or on any metric but the registered one. |\n"
+        "| Accept a winner that hurts a guardrail | It is held for a person to decide. |\n"
         "| Turn down a confident winner on a hunch | A significant A/B winner is accepted unless a specific risk is stated. |\n"
         "| Overspend | A weekly cap checked before every model request. |"
     )

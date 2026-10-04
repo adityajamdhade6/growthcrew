@@ -8,8 +8,8 @@ import { Badge, Button, Card, Empty, ErrorState, Loading, Notice, PageHeader, Se
 
 type Row = { id: string; dimension: string; value: string; metric: string; pieces: number; trials: number; successes: number; rate_pct: number };
 type Arm = { label: string; trials: number; successes: number; rate_pct: number };
-type Uncertainty = { leader: string; prob_best: Record<string, number>; lift_low_pct: number | null; lift_high_pct: number | null; sample_size: number };
-type Readout = { id: string; kind: string; name: string; title: string; uncertainty: Uncertainty; metric: string; arms: Arm[]; status: string; winner: string | null; p_value: number | null; lift_pct: number | null; note: string };
+type Uncertainty = { leader: string; prob_best: Record<string, number>; expected_loss_pct: Record<string, number>; lift_low_pct: number | null; lift_high_pct: number | null; sample_size: number };
+type Readout = { id: string; kind: string; name: string; title: string; uncertainty: Uncertainty; metric: string; arms: Arm[]; status: string; winner: string | null; lift_pct: number | null; note: string; preregistered: boolean; hypothesis: string; planned_per_variant: number | null; more_needed: number; guardrail_flags: string[]; next_split: Record<string, number> | null };
 type Analysis = {
   window_start: string | null;
   window_end: string | null;
@@ -96,9 +96,9 @@ function Performance({ rows }: { rows: Row[] }) {
 function ReadoutCard({ readout }: { readout: Readout }) {
   const tooEarly = readout.status === "not_enough_data";
   const u = readout.uncertainty;
-  const smallest = [...readout.arms].sort((a, b) => a.trials - b.trials)[0];
-  const leader = [...readout.arms].sort((a, b) => b.rate_pct - a.rate_pct)[0];
-  const verdict = readout.status === "significant" ? `${label(readout.winner!)} ${readout.kind === "ab_test" ? "wins" : "leads"}` : readout.status === "not_enough_data" ? "Not enough data yet" : "No real difference";
+  const descriptive = readout.status === "not_preregistered";
+  const held = readout.status === "significant" && readout.guardrail_flags.length > 0;
+  const verdict = held ? `${label(readout.winner!)} wins, held: hurts a guardrail` : readout.status === "significant" ? `${label(readout.winner!)} wins` : tooEarly ? "Keep running" : descriptive ? "Descriptive only" : "No clear difference";
   return (
     <Card>
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
@@ -106,9 +106,9 @@ function ReadoutCard({ readout }: { readout: Readout }) {
           <p className="font-medium">{readout.kind === "ab_test" ? "A/B test" : "Comparison"}: {readout.title}</p>
           <p className="text-xs text-muted">{label(readout.metric)}{readout.kind === "observational" && " · different pieces, so treat as a lead, not proof"}</p>
         </div>
-        <Badge tone={readout.status === "significant" ? "good" : readout.status === "not_enough_data" ? "warn" : "neutral"}>{verdict}</Badge>
+        <Badge tone={held ? "bad" : readout.status === "significant" ? "good" : tooEarly ? "warn" : "neutral"}>{verdict}</Badge>
       </div>
-      <Bars muted={tooEarly} rows={readout.arms.map((arm) => ({ label: label(arm.label), value: arm.rate_pct, detail: `${arm.successes.toLocaleString()} of ${arm.trials.toLocaleString()}`, mark: arm.label === readout.winner ? "Winner" : undefined }))} />
+      <Bars muted={tooEarly || descriptive} rows={readout.arms.map((arm) => ({ label: label(arm.label), value: arm.rate_pct, detail: `${arm.successes.toLocaleString()} of ${arm.trials.toLocaleString()}`, mark: arm.label === readout.winner ? "Winner" : undefined }))} />
       {/* Uncertainty is shown with every verdict, so "wins" is never a bare label. */}
       <p className="mt-3 text-sm tabular-nums">
         {u.prob_best[u.leader] > 0.999 ? "Over 99.9" : Math.round(u.prob_best[u.leader] * 100)}% probability that {label(u.leader).toLowerCase()} is best
@@ -117,11 +117,21 @@ function ReadoutCard({ readout }: { readout: Readout }) {
       </p>
       <p className="mt-1 text-sm text-muted">
         {readout.status === "significant"
-          ? `${readout.lift_pct}% better than the runner-up. The chance this is a fluke is ${readout.p_value! < 0.001 ? "under 0.1%" : `${(readout.p_value! * 100).toFixed(1)}%`}.`
+          ? `Choosing ${label(readout.winner!).toLowerCase()} is expected to cost ${u.expected_loss_pct[readout.winner!]}% of the rate if that is wrong.`
           : tooEarly
-            ? `Too early to call, whatever the bars suggest. Each variant needs about 100 visits and a handful of results; the smallest has ${smallest.trials} and ${smallest.successes}. Keep it running.`
-            : `${label(leader.label)} is ahead, but a gap this size could easily be chance. Keep it running or call it a tie.`}
+            ? `Too early to call, whatever the bars suggest. About ${readout.more_needed.toLocaleString()} more needed; ${readout.planned_per_variant?.toLocaleString()} per variant were planned.`
+            : descriptive
+              ? "These were never registered as a test, so no winner is called. Register one to find out."
+              : "The planned sample is in and nothing separates the variants. Treat them as equivalent."}
       </p>
+      {readout.guardrail_flags.map((flag) => <p key={flag} className="mt-2 text-sm text-bad">Guardrail: {flag}</p>)}
+      {readout.next_split && (
+        <p className="mt-2 text-sm">
+          <span className="font-medium">Next week&apos;s budget split:</span>{" "}
+          {Object.entries(readout.next_split).map(([name, share]) => `${label(name)} ${Math.round(share * 100)}%`).join(" · ")}
+        </p>
+      )}
+      {readout.preregistered && <p className="mt-2 text-xs text-muted">Pre-registered: {readout.hypothesis}</p>}
     </Card>
   );
 }
