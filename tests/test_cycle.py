@@ -289,32 +289,44 @@ def test_budget_endpoints(client):
 # --- learning from edits ---
 
 
-def test_edits_store_a_diff_and_recurring_edits_become_voice_rules(setup, engine, tmp_path):
+def test_edits_store_a_diff_and_recurring_edits_are_proposed_not_applied(setup, engine, tmp_path):
+    from growthcrew.brain import learning
+    from growthcrew.db.models import Draft
+
     orchestrator, _ = setup
-    learned_each_time = []
+    proposed_each_time = []
     for _ in range(3):
         cycle = run_cycle(orchestrator)
         with Session(engine) as session:
-            from growthcrew.db.models import Draft
-
             draft = session.exec(
                 select(Draft).where(
                     Draft.cycle_id == cycle.id, Draft.content_type == "linkedin_post"
                 )
             ).one()
         edited = draft.text.replace("!", ".")
-        approval, learned = workflow.decide(
+        approval, proposed = workflow.decide(
             engine, draft.id, "edited", "adi", "Too shouty", edited, root=tmp_path
         )
-        learned_each_time.append(learned)
+        proposed_each_time.append(proposed)
 
     assert "-Great bread! Really great!" in approval.diff
     assert "+Great bread. Really great." in approval.diff
-    assert learned_each_time == [[], [], ["Do not use exclamation marks."]]
+    assert proposed_each_time == [[], [], ["Do not use exclamation marks."]]
 
+    # The third identical edit proposes a rule. Nothing changes until a person accepts it.
+    assert load_brain("acme", root=tmp_path).version == 1
+    [proposal] = learning.proposals(engine, "acme")
+    assert (proposal["rule"], proposal["times_seen"]) == ("Do not use exclamation marks.", 3)
+
+    assert (
+        learning.resolve_proposal(engine, "acme", proposal["id"], True, root=tmp_path) == "accepted"
+    )
     brain = load_brain("acme", root=tmp_path)
-    assert brain.version == 2
-    assert "Do not use exclamation marks." in brain.voice.guide.rules
+    assert brain.version == 2 and "Do not use exclamation marks." in brain.voice.guide.rules
+    assert learning.proposals(engine, "acme") == []
+    with pytest.raises(LookupError):
+        learning.resolve_proposal(engine, "acme", proposal["id"], True, root=tmp_path)
+
     with Session(engine) as session:
         [item] = session.exec(select(CalendarItem).where(CalendarItem.cycle_id == cycle.id)).all()
         draft = session.get(Draft, item.draft_id)

@@ -43,8 +43,8 @@ def badges(app) -> list[str]:
 def test_demo_renders_every_tab_without_errors(demo):
     assert not demo.exception
     labels = [tab.label for tab in demo.tabs]
-    assert labels[:5] == ["Mission control", "Calendar", "Strategy", "Results", "Brand brain"]
-    assert labels[5:] == ["How it works", "Evals"]
+    assert labels[:5] == ["Mission control", "Calendar", "Strategy", "Results", "Playbook"]
+    assert labels[5:] == ["Brand brain", "How it works", "Evals"]
     header = demo.markdown[0].value
     assert "Built by" in header and "github.com/adityajamdhade6/growthcrew" in header
     assert "docs/case_study.md" in header
@@ -115,3 +115,15 @@ def test_channel_plan_how_it_works_and_evals_are_present(demo):
     assert len(demo.get("vega_lite_chart")) == 5  # CTR, three readouts, the plan timeline
     assert len(demo.get("graphviz_chart")) == 1
     assert "Eval scorecard" in text and "Analyst winner detection" in text
+
+
+def test_playbook_tab_shows_rules_history_and_what_was_learned(demo):
+    text = text_of(demo)
+    assert "What this brand has learned" in text
+    assert "On LinkedIn posts, a question as the hook beats a statement as the hook" in text
+    assert "Active" in badges(demo) and "Retired" in badges(demo)
+    labels = [e.label for e in demo.expander]
+    assert any(label.startswith("History (") for label in labels)
+    assert "Performance by prompt and strategy version" in text
+    # New drafts show which past winners and rules the writer was given.
+    assert any(label.startswith("Written with") for label in labels)

@@ -58,6 +58,9 @@ from growthcrew.frameworks.jtbd import Job, JobsToBeDone
 from growthcrew.frameworks.messaging_house import MessagingHouse, Pillar
 from growthcrew.frameworks.positioning import Positioning
 from growthcrew.frameworks.test_and_learn import Experiment
+from growthcrew.memory import playbook
+from growthcrew.memory.miner import mine
+from growthcrew.memory.simulate import run as simulate_memory
 from growthcrew.reports.strategy import save_strategy
 
 WORKSPACE = "demo-loomhouse"
@@ -392,10 +395,17 @@ def main() -> None:
     strategy = demo_strategy(brain, research)
     save_strategy(strategy, WORKSPACES_DIR, pdf=False)
 
+    # Twelve earlier weeks of published LinkedIn posts, mined weekly: the brand's memory and
+    # playbook. Simulated, with one pattern that is real and one that stops holding.
+    simulate_memory(engine, workspace=WORKSPACE)
+
     # Last week: published pieces with performance data, analysed.
     for source, text in seed_performance(engine, workspace=WORKSPACE).items():
         ingest(engine, WORKSPACE, source, text)
     analysis = analyze(engine, WORKSPACE)
+    # The weekly memory job, as it runs at the start of each cycle: remember last week's
+    # pieces and re-test the playbook.
+    mine(engine, WORKSPACE, as_of=datetime(2026, 9, 28, tzinfo=UTC))
     ad = next(r.id for r in analysis.readouts if r.name == "07-day03-ad")
     hero = next(r.id for r in analysis.readouts if r.name == "08-day04-landing_hero")
     posts = next(r.id for r in analysis.readouts if r.name == "linkedin_post by angle")
@@ -507,12 +517,18 @@ def main() -> None:
         for piece, kind, angle, day, text, scores, edits, violations, status in drafts:
             history = _history(text, scores, edits, violations)
             meta = json.loads(history)[-1]["metadata"]
+            # What the writer would have been shown from memory for this piece.
+            _, used = playbook.writer_context(
+                engine, WORKSPACE, kind, f"{text[:120]} {meta['messaging_pillar']}"
+            )
             session.add(Draft(cycle_id=cycle.id, workspace=WORKSPACE, piece_id=piece,
                               content_type=kind, angle=angle, day=day, original_text=text, text=text,
                               body_json="{}", metadata_json=json.dumps(meta),
                               min_score=min(scores.values()),
                               passed_critic=min(scores.values()) >= 8 and not violations,
-                              history_json=history, status=status))  # fmt: skip
+                              history_json=history, status=status,
+                              memory_json=used.model_dump_json(), prompt_version="p-sim00002",
+                              strategy_version=1))  # fmt: skip
         if not session.exec(select(User).where(User.email == DEMO_EMAIL)).first():
             session.commit()
             create_user(engine, DEMO_EMAIL, DEMO_PASSWORD, "*")

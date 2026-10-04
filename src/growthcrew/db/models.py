@@ -16,6 +16,8 @@ class LLMCall(SQLModel, table=True):
     workspace: str | None = Field(default=None, index=True)
     # What the call was for, e.g. "linkedin_post|01-day02-linkedin_post". Prices each piece.
     tag: str | None = Field(default=None, index=True)
+    # Short hash of the system prompt, so results can be compared across prompt changes.
+    prompt_version: str = ""
     # The model that served the response, which differs from the requested
     # model when a refusal fallback ran.
     model: str
@@ -121,6 +123,11 @@ class Draft(SQLModel, table=True):
     passed_critic: bool
     # Every version with its critique, as JSON, for the review panel.
     history_json: str = "[]"
+    # Which writer prompt and which strategy produced this draft.
+    prompt_version: str = ""
+    strategy_version: int = 0
+    # The past winners and playbook rules the writer was given, as JSON.
+    memory_json: str = "{}"
     # pending_approval, approved, rejected
     status: str = Field(default="pending_approval", index=True)
     created_at: datetime = Field(default_factory=_now)
@@ -169,6 +176,9 @@ class EditPattern(SQLModel, table=True):
     key: str
     rule: str
     count: int = 0
+    # counting, proposed (waiting for a person), accepted (written into the voice guide),
+    # rejected
+    status: str = "counting"
     # True once the rule has been written into the brand voice guide.
     applied: bool = False
 
@@ -311,3 +321,65 @@ class ExperimentRegistration(SQLModel, table=True):
     data: str
     # The readout from the first judgement at the planned sample. Once set, it is the answer.
     verdict: str | None = None
+
+
+class MemoryPiece(SQLModel, table=True):
+    """A published piece with its final performance: the brand's long-term content memory."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    draft_id: int = Field(index=True, unique=True)
+    content_type: str = Field(index=True)
+    published_on: datetime
+    text: str
+    pillar: str = ""
+    angle: str | None = None
+    persona: str = ""
+    hypothesis: str = ""
+    metric: str
+    trials: int
+    successes: int
+    rate: float
+    # This piece's rate divided by the average for its content type in the workspace.
+    score: float = 1.0
+    # Features of the text the pattern miner looks at, as JSON {name: bool}.
+    features: str = "{}"
+    # The text's embedding, as a JSON list of floats.
+    embedding: str = "[]"
+    prompt_version: str = ""
+    strategy_version: int = 0
+
+
+class PlaybookRule(SQLModel, table=True):
+    """A pattern the miner found in this brand's own results."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    content_type: str
+    feature: str
+    statement: str
+    # candidate, active, weakening, retired
+    status: str = "candidate"
+    lift_pct: float = 0.0
+    probability: float = 0.0
+    pieces_with: int = 0
+    pieces_without: int = 0
+    found_on: datetime
+    updated_on: datetime
+    # Consecutive runs in which the evidence held, or failed to.
+    held_runs: int = 0
+    failed_runs: int = 0
+
+
+class RuleEvent(SQLModel, table=True):
+    """One entry in a rule's history: what the miner saw on one run."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    rule_id: int = Field(index=True)
+    at: datetime
+    status: str
+    lift_pct: float
+    probability: float
+    pieces_with: int
+    pieces_without: int
+    note: str = ""

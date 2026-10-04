@@ -21,6 +21,7 @@ type Review = {
   violations: { rule: string; line: number; excerpt: string; reason: string }[];
   first_draft: string | null;
   tracking_key: string;
+  memory: { examples?: { text: string; rate_pct: number; metric: string; score: number; published_on: string }[]; rules?: string[] };
   variants: { id: number; angle: string; status: string; lowest_score: number }[];
 };
 
@@ -46,9 +47,9 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
     setBusy(true);
     setError(null);
     try {
-      const result = (await action()) as { voice_rules_learned?: string[] } | undefined;
-      const learned = result?.voice_rules_learned ?? [];
-      setNotice(learned.length ? `${done} New voice rule learned from your edits: ${learned.join("; ")}` : done);
+      const result = (await action()) as { voice_rules_proposed?: string[] } | undefined;
+      const learned = result?.voice_rules_proposed ?? [];
+      setNotice(learned.length ? `${done} Proposed as a brand voice rule, waiting in the Playbook: ${learned.join("; ")}` : done);
       setMode("view");
       setDecided(true);
       review.reload();
@@ -211,6 +212,22 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
             ))}
             <div><dt className="text-xs font-semibold uppercase text-muted">Tracking key</dt><dd className="break-all font-mono text-xs">{data.tracking_key}</dd></div>
           </dl>
+
+          {((data.memory?.examples?.length ?? 0) > 0 || (data.memory?.rules?.length ?? 0) > 0) && (
+            <details>
+              <summary className="cursor-pointer text-sm font-medium">
+                Written with {data.memory.examples?.length ?? 0} past winner{data.memory.examples?.length === 1 ? "" : "s"} and {data.memory.rules?.length ?? 0} playbook rule{data.memory.rules?.length === 1 ? "" : "s"}
+              </summary>
+              <ul className="mt-2 space-y-1.5 text-sm">
+                {data.memory.rules?.map((rule) => <li key={rule}><span className="font-medium">Rule:</span> {rule}</li>)}
+                {data.memory.examples?.map((example, index) => (
+                  <li key={index} className="text-muted">
+                    <span className="font-medium text-ink">Past winner</span> ({example.rate_pct}% {example.metric}, {example.score.toFixed(1)}x the brand average): “{example.text.split("\n")[0]}”
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
 
           {data.edits.length > 0 && (
             <details>

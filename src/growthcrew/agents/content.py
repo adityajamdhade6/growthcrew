@@ -31,6 +31,8 @@ from growthcrew.content.types import (
 )
 from growthcrew.db.models import ContentRevision
 from growthcrew.llm import LLM
+from growthcrew.memory import playbook
+from growthcrew.versions import prompt_version
 
 WORKSPACES_DIR = Path("workspaces")
 MAX_ROUNDS = 3
@@ -145,14 +147,19 @@ class ContentAgent:
         # Tagging every call with the piece lets the cost dashboard price each piece.
         tag = f"{request.content_type}|{piece_id}"
         facts = allowed_facts(brand, strategy)
-        chat = self.llm.conversation(
-            self.role, system=f"{SYSTEM}\n\n{BRAIN_NOTE}", workspace=workspace, tag=tag
-        )
+        system = f"{SYSTEM}\n\n{BRAIN_NOTE}"
+        record.prompt_version = prompt_version(system)
+        # The brand's own past winners and the playbook rules that currently hold.
+        remembered, record.memory = playbook.writer_context(
+            self.llm.engine, workspace, request.content_type,
+            f"{request.topic} {request.pillar} {request.goal} {request.audience}",
+        )  # fmt: skip
+        chat = self.llm.conversation(self.role, system=system, workspace=workspace, tag=tag)
         brief = (
             f"{self._context(brand, strategy)}\n\n"
             f"Content request: {request.model_dump_json()}\n\n"
             f"{template.prompt()}\n\n"
-            f"{ANGLE_BRIEFS[angle] if angle else ''}"
+            f"{ANGLE_BRIEFS[angle] if angle else ''}\n\n{remembered}"
         ).strip()
         if template.body_model is BlogArticle:
             record.seo_brief = chat.extract(

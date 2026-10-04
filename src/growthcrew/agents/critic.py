@@ -9,6 +9,7 @@ from growthcrew.content.checks import allowed_facts, banned_phrases, cliche_hits
 from growthcrew.content.templates import TEMPLATES
 from growthcrew.content.types import ContentRequest
 from growthcrew.llm import LLM
+from growthcrew.memory import playbook
 
 # A deterministic finding caps the model's score for that criterion at this value.
 CAPS = {"ai_cliche": 4, "channel_fit": 5, "accuracy": 3, "voice": 5}
@@ -86,6 +87,11 @@ class CriticAgent:
             ],
         }
         all_findings = [item for items in findings.values() for item in items]
+        # Where the draft departs from what has worked for this brand. Advice, so no score cap.
+        if workspace:
+            all_findings += playbook.check_draft(
+                self.llm.engine, workspace, request.content_type, "\n".join(lines)
+            )
 
         proof = brand.proof
         proof_lines = "\n".join(

@@ -43,6 +43,10 @@ flowchart LR
     S -->|accepted changes| C
 ```
 
+It also remembers. Every measured piece goes into a content memory; a weekly job looks for
+patterns that keep holding and retires the ones that stop; and the writer is shown the brand's
+own past winners before each draft.
+
 **The loop that matters** is the bottom one: results come back, the analyst proposes three
 changes, the strategist accepts or rejects each with a reason, and accepted changes alter next
 week's content plan. Every ruling is kept in a learning log.
@@ -70,6 +74,7 @@ From `make eval` (offline; no API key). Full output in `evals/results/scorecard.
 | Experiment engine: false winners between identical variants | 4.4% at worst across five scenarios, 2,000 simulated tests each |
 | Experiment engine: right winner at the planned sample | 76 to 78% of 1,000 tests; wrong winner in none |
 | Experiment engine: calls a winner on a tiny sample | 0 of 200 |
+| Pattern miner, 12 simulated weeks x 20 seeds | Real pattern active at week 12 in 20 of 20; the one that stopped holding was out of use in 20 of 20 (retired in 19) |
 | Bandit against an even budget split | 61% fewer clicks given up over 8 simulated weeks |
 | Analyst: simulated weeks, end to end through CSV ingest | 10 of 10 correct |
 | Guardrails: labelled cases | 28 of 28 (every must-block line blocked, no false blocks) |

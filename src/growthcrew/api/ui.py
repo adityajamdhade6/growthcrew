@@ -17,6 +17,7 @@ from growthcrew.analytics.analysis import analyze
 from growthcrew.analytics.ingest import SOURCES
 from growthcrew.api import auth
 from growthcrew.api.deps import engine_dep, guard, llm_dep
+from growthcrew.brain import learning
 from growthcrew.brain.models import FIELD_PATHS
 from growthcrew.brain.onboarding import Questionnaire, onboard, workspace_name
 from growthcrew.brain.store import (
@@ -37,6 +38,7 @@ from growthcrew.db.models import (
     StrategyComment,
 )
 from growthcrew.llm import LLM
+from growthcrew.memory import playbook
 from growthcrew.reports.strategy import save_strategy
 
 router = APIRouter()
@@ -370,6 +372,10 @@ def review(draft_id: int, engine: Engine = Depends(engine_dep)) -> dict:
         "violations": final.get("guardrail_violations", []),
         "first_draft": history[0]["text"] if len(history) > 1 else None,
         "tracking_key": draft.tracking_key,
+        # The past winners and playbook rules the writer was shown.
+        "memory": json.loads(draft.memory_json or "{}"),
+        "prompt_version": draft.prompt_version,
+        "strategy_version": draft.strategy_version,
         "variants": [
             {"id": other.id, "angle": other.angle, "status": other.status,
              "lowest_score": other.min_score}
@@ -455,3 +461,30 @@ def set_model(body: ModelIn, engine: Engine = Depends(engine_dep)) -> dict:
         session.merge(RoleModel(role=body.role.value, model=body.model))
         session.commit()
     return _models(engine)
+
+
+# --- playbook and voice-rule proposals ---
+
+
+@router.get("/workspaces/{workspace}/playbook")
+def get_playbook(workspace: str, engine: Engine = Depends(engine_dep)) -> dict:
+    """Active rules with their evidence and history, and what was learned in 90 days."""
+    return playbook.summary(engine, workspace)
+
+
+class ProposalIn(BaseModel):
+    accept: bool
+
+
+@router.get("/workspaces/{workspace}/voice-proposals")
+def voice_proposals(workspace: str, engine: Engine = Depends(engine_dep)) -> list[dict]:
+    """Voice rules proposed from recurring human edits, waiting for a decision."""
+    return learning.proposals(engine, workspace)
+
+
+@router.post("/workspaces/{workspace}/voice-proposals/{proposal_id}")
+def decide_proposal(
+    workspace: str, proposal_id: int, body: ProposalIn, engine: Engine = Depends(engine_dep)
+) -> dict:
+    outcome = guard(lambda: learning.resolve_proposal(engine, workspace, proposal_id, body.accept))
+    return {"id": proposal_id, "status": outcome}

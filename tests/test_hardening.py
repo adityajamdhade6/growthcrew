@@ -82,8 +82,10 @@ def test_init_db_adds_columns_the_models_have_gained():
         connection.execute(text("ALTER TABLE draft DROP COLUMN history_json"))
         connection.execute(text(
             "INSERT INTO draft (cycle_id, workspace, piece_id, content_type, original_text, text,"
-            " body_json, metadata_json, min_score, passed_critic, status, created_at)"
-            " VALUES (1, 'acme', 'p', 'ad', 'x', 'x', '{}', '{}', 9, 1, 'approved', '2026-01-01')"
+            " body_json, metadata_json, min_score, passed_critic, status, created_at,"
+            " prompt_version, strategy_version, memory_json)"
+            " VALUES (1, 'acme', 'p', 'ad', 'x', 'x', '{}', '{}', 9, 1, 'approved', '2026-01-01',"
+            " '', 0, '{}')"
         ))  # fmt: skip
     init_db(engine)
     assert "history_json" in {c["name"] for c in inspect(engine).get_columns("draft")}

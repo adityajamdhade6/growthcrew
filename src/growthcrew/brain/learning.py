@@ -42,11 +42,12 @@ def detect(original: str, edited: str) -> dict[str, str]:
 def record_edit(
     engine: Engine, workspace: str, original: str, edited: str, root: Path = WORKSPACES_DIR
 ) -> list[str]:
-    """Count this edit's patterns and write any that have become recurring into the brain.
+    """Count this edit's patterns. A pattern seen often enough becomes a proposal for a person
+    to accept or reject; nothing is written into the brand voice here.
 
-    Returns the rules that were added to the brand voice guide by this edit.
+    Returns the rules newly proposed by this edit.
     """
-    learned: list[tuple[str, str]] = []
+    proposed = []
     with Session(engine) as session:
         for key, rule in detect(original, edited).items():
             pattern = session.exec(
@@ -55,27 +56,55 @@ def record_edit(
                 )
             ).first() or EditPattern(workspace=workspace, key=key, rule=rule)
             pattern.count += 1
-            if pattern.count >= RECURRING and not pattern.applied:
-                pattern.applied = True
-                learned.append((key, rule))
+            if pattern.count >= RECURRING and pattern.status == "counting":
+                pattern.status = "proposed"
+                proposed.append(_label(key, rule))
             session.add(pattern)
         session.commit()
-    if not learned:
-        return []
+    return proposed
 
-    try:
-        brain = load_brain(workspace, root=root)
-    except FileNotFoundError:
-        return []
+
+def _label(key: str, rule: str) -> str:
+    return f"Ban the word '{rule}'" if key.startswith("word:") else rule
+
+
+def proposals(engine: Engine, workspace: str) -> list[dict]:
+    """Voice rules waiting for a person's decision, with how often the edit was made."""
+    with Session(engine) as session:
+        rows = session.exec(
+            select(EditPattern).where(
+                EditPattern.workspace == workspace, EditPattern.status == "proposed"
+            )
+        ).all()
+    return [
+        {"id": row.id, "rule": _label(row.key, row.rule), "times_seen": row.count} for row in rows
+    ]
+
+
+def resolve_proposal(
+    engine: Engine, workspace: str, proposal_id: int, accept: bool, root: Path = WORKSPACES_DIR
+) -> str:
+    """Accept a proposal (write it into the brand voice as a new brain version) or reject it."""
+    with Session(engine) as session:
+        pattern = session.get(EditPattern, proposal_id)
+        if pattern is None or pattern.workspace != workspace or pattern.status != "proposed":
+            raise LookupError("No such proposal is waiting")
+        pattern.status = "accepted" if accept else "rejected"
+        pattern.applied = accept
+        key, rule = pattern.key, pattern.rule
+        session.add(pattern)
+        session.commit()
+    if not accept:
+        return "rejected"
+    brain = load_brain(workspace, root=root)
     guide = brain.voice.guide
-    added = []
-    for key, rule in learned:
-        target = guide.banned_phrases if key.startswith("word:") else guide.rules
-        if rule not in target:
-            target.append(rule)
-            added.append(f"banned phrase '{rule}'" if key.startswith("word:") else rule)
-    if added:
+    target = guide.banned_phrases if key.startswith("word:") else guide.rules
+    if rule not in target:
+        target.append(rule)
         save_brain(
-            brain, note=f"learned from reviewer edits: {'; '.join(added)}", root=root, engine=engine
+            brain,
+            note=f"learned from reviewer edits: {_label(key, rule)}",
+            root=root,
+            engine=engine,
         )
-    return added
+    return "accepted"

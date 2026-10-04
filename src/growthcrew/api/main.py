@@ -190,7 +190,7 @@ def decide(
             engine, draft_id, body.decision, reviewer, body.comment, body.edited_text
         )
     )
-    return {"approval": approval, "voice_rules_learned": learned}
+    return {"approval": approval, "voice_rules_proposed": learned}
 
 
 @app.get("/drafts/{draft_id}/text")

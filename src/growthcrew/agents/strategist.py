@@ -25,6 +25,7 @@ from growthcrew.frameworks.messaging_house import MessagingHouse
 from growthcrew.frameworks.positioning import Positioning
 from growthcrew.frameworks.test_and_learn import TestPlan
 from growthcrew.llm import LLM, Conversation
+from growthcrew.memory import playbook
 
 WORKSPACES_DIR = Path("workspaces")
 EXPERIMENTS = 5
@@ -83,7 +84,9 @@ a reason. Rejecting a point is fine when the evidence is on your side. Then you 
 for each section again. First, write the revision log."""
 
 
-def build_evidence(brand: Brain, research: ResearchReport) -> list[EvidenceItem]:
+def build_evidence(
+    brand: Brain, research: ResearchReport, rules: list | None = None
+) -> list[EvidenceItem]:
     items: list[EvidenceItem] = []
     for path in FIELD_PATHS:
         if brand.is_empty(path):
@@ -118,6 +121,13 @@ def build_evidence(brand: Brain, research: ResearchReport) -> list[EvidenceItem]
                 id=f"voc:{number}",
                 text=f"Customer theme '{theme.theme}' ({theme.frequency} quotes): {quotes}",
                 source_url=theme.quotes[0].source_url if theme.quotes else "",
+            )
+        )
+    # Patterns found in this brand's own published results.
+    for rule in rules or []:
+        items.append(
+            EvidenceItem(
+                id=f"rule:{rule.id}", text=playbook.describe(rule), quality="playbook rule, active"
             )
         )
     return items
@@ -418,7 +428,8 @@ class StrategistAgent:
 
     def run(self, inp: StrategyInput, workspace: str | None = None) -> StrategyDoc:
         workspace = workspace or inp.brand.workspace
-        evidence = build_evidence(inp.brand, inp.research)
+        rules = playbook.rules(self.llm.engine, workspace, "active")
+        evidence = build_evidence(inp.brand, inp.research, rules)
         known = {item.id for item in evidence}
         rendered = render_evidence(evidence)
 

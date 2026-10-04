@@ -36,9 +36,11 @@ from growthcrew.db.models import (
 )
 from growthcrew.db.session import get_engine
 from growthcrew.llm import LLM
+from growthcrew.memory import miner
 from growthcrew.naming import display, piece_name, plural
 from growthcrew.reports.content import save_batch
 from growthcrew.reports.strategy import save_strategy
+from growthcrew.versions import strategy_version
 from growthcrew.workflow import STAGES
 
 logger = logging.getLogger(__name__)
@@ -200,6 +202,8 @@ class Orchestrator:
             strategy = load_latest_strategy(workspace, self.root)
         except FileNotFoundError:
             strategy = None
+        # The weekly memory job: remember measured pieces and re-test every playbook rule.
+        miner.mine(self.engine, workspace, as_of=datetime.now(UTC))
         notes = []
         if strategy is None or new:
             brand = load_brain(workspace, root=self.root)
@@ -290,6 +294,7 @@ class Orchestrator:
                 records[0].final.metadata.hypothesis if records else "",
             )  # fmt: skip
         save_batch(batch, self.root)
+        version = strategy_version(workspace, self.root)
         with Session(self.engine) as session:
             for piece in batch.pieces:
                 final = piece.final
@@ -307,6 +312,9 @@ class Orchestrator:
                         metadata_json=final.metadata.model_dump_json(),
                         min_score=min(final.critique.scores().values()),
                         passed_critic=piece.passed,
+                        prompt_version=piece.prompt_version,
+                        strategy_version=version,
+                        memory_json=piece.memory.model_dump_json(),
                         history_json=json.dumps(
                             [version.model_dump(mode="json") for version in piece.versions]
                         ),

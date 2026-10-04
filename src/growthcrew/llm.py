@@ -21,6 +21,7 @@ from growthcrew import budget, config
 from growthcrew.config import AgentRole
 from growthcrew.db.models import LLMCall, RoleModel
 from growthcrew.db.session import get_engine
+from growthcrew.versions import prompt_version
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,7 @@ class LLM:
         structured = "output_format" in kwargs
         method = messages.parse if structured else messages.create
 
+        version = prompt_version(str(request.get("system", "")))
         started = time.monotonic()
         try:
             response = method(**kwargs)
@@ -154,6 +156,7 @@ class LLM:
                     agent=role.value,
                     workspace=workspace,
                     tag=tag,
+                    prompt_version=version,
                     model=cfg.model,
                     latency_ms=_elapsed_ms(started),
                     success=False,
@@ -176,6 +179,7 @@ class LLM:
                 agent=role.value,
                 workspace=workspace,
                 tag=tag,
+                prompt_version=version,
                 model=response.model,
                 input_tokens=usage.input_tokens or 0,
                 output_tokens=usage.output_tokens or 0,

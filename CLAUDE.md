@@ -23,6 +23,7 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - `src/growthcrew/frameworks/`: one module per marketing framework. Each is a `Framework` (purpose, inputs, pydantic output schema, quality criteria, instructions) rendered through `templates/framework.j2`. Add a framework by adding a module and listing it in `FRAMEWORKS`.
 - `src/growthcrew/content/`: content types (`types.py`), one template per type with best practices and platform limits (`templates.py`), and deterministic draft checks (`checks.py`).
 - `src/growthcrew/experiments/`: the experiment engine (Bayesian A/B/n, decision rule, pre-registration, power, bandit, guardrails, simulations). Standalone: it must not import anything else from GrowthCrew, and a test enforces that.
+- `src/growthcrew/memory/`: content memory with embeddings (`store.py`, `embed.py`), the weekly pattern miner and rule decay (`miner.py`), and the playbook the agents read (`playbook.py`).
 - `src/growthcrew/analytics/`: CSV ingest and piece matching (`ingest.py`), registrations and final verdicts (`registry.py`), and the weekly numbers (`analysis.py`). No model calls in this package.
 - `src/growthcrew/reports/`: Markdown and PDF rendering of agent outputs.
 - `src/growthcrew/db/`: SQLModel models and migrations.
@@ -49,6 +50,9 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - A change backed by a called winner is accepted by default; a stated risk makes it a partial shift to confirm next week, never a rejection (`strategist.decide_rulings`).
 - Every experiment result is shown with its uncertainty: probability the leader is best, a 95% interval on the lift, and the sample size. Never show a bare "wins", and never print 100% for a probability.
 - User-facing text uses `naming.display`, `piece_name` and `plural`; no raw ids or enum values on screen.
+- Playbook rules come from comparing pieces that happened to differ, so they are leads, not results. Agents follow only `active` rules; the editor's playbook check is advice and never caps a score; and a rule may shift content only through the normal path (a proposed change backed by a called winner).
+- Do not loosen the miner to keep a rule alive: two runs to activate, one miss to take it out of use, and the within-group comparison against the strongest feature all stay.
+- Recurring human edits are proposed as voice rules and written into the brain only when a person accepts them.
 - The analyst interprets statistics; it never computes them. A winner exists only when a pre-registered test, judged once at its planned sample on its registered metric, meets the decision rule in `experiments/decide.py`. Unregistered comparisons are descriptive only. Do not loosen `loss_threshold`, the probability requirement or `MIN_TRIALS` to get a result, and do not let a verdict be recomputed after it is final.
 - A winner that damages a registered guardrail metric is held for a person: the strategist cannot accept it and the bandit does not give it the budget.
 - Analytics rows that cannot be matched to a piece are reported as unmatched, never assigned by guess.
@@ -92,6 +96,7 @@ From the v2 upgrade pack (13 phases). They apply to every phase.
 - Weekly cycle: `uv run growthcrew cycle <workspace>` (or `POST /workspaces/<workspace>/cycles`)
 - Evals: `make eval` (offline, free) and `make eval-live [LIMIT=5]` (calls the model). Scorecard in `evals/results/`.
 - Cost dashboard: `/costs/dashboard?workspace=<workspace>`
+- Twelve simulated weeks through the pattern miner: `uv run python -c "from sqlmodel import SQLModel, create_engine; from growthcrew.db import models; from growthcrew.memory.simulate import run; e = create_engine('sqlite://'); SQLModel.metadata.create_all(e); [print(w) for w in run(e)]"`
 - Experiment engine simulation report (writes charts to `reports/experiments/`): `uv run python -m evals.experiments_report`
 - Simulated week (no API key needed): `uv run python evals/simulate_week.py`
 - API: `uv run uvicorn growthcrew.api.main:app --reload`

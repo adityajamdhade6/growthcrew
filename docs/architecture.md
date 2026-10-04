@@ -78,12 +78,37 @@ GrowthCrew). See [experiments.md](experiments.md) for the reasoning.
 `analytics/registry.py` stores registrations and final verdicts, and registers each A/B-tested
 piece as it is drafted. `analytics/analysis.py` builds the readouts.
 
+## Long-term memory and the playbook
+
+`memory/` lets the system remember what worked months ago, not just last week.
+
+| Module | Does |
+|---|---|
+| `store.py` | Remembers every published piece that has results: text, pillar, angle, persona, hypothesis, final rate, a score against the brand's average, and an embedding. `best_similar` returns the best-performing pieces among those most like a request. |
+| `embed.py` | The `Embedder` interface and a local default that hashes words and character n-grams. It matches wording and topic vocabulary; it is not a semantic model. |
+| `features.py` | The yes/no features the miner compares (question hook, number in the hook, and so on). |
+| `miner.py` | The weekly job. Compares pieces with and without each feature, piece against piece, over a rolling six-week window. A pattern must hold on two runs to become an active rule; one miss takes it out of use; three misses or a reversal retire it. A feature must show its effect within groups of the strongest one, so a feature that only rides along does not become a rule. |
+| `playbook.py` | Active rules with their history, what the writer is shown, the editor's check, and performance per prompt and strategy version. |
+
+How agents use it: the writer is shown the brand's own past winners and the active rules before
+drafting, and each draft records what it was shown. The strategist can cite a rule as evidence
+(`rule:N`). The editor is told where a draft goes against an active rule, as advice.
+
+Patterns are observational. They are leads for a registered test, not results, and the
+Playbook page says so.
+
+Recurring human edits become **proposals** in `EditPattern`; a person accepts or rejects each
+one, and only an accepted proposal is written into the brand voice.
+
+Every model call logs a `prompt_version` (a short hash of its system prompt), and every draft
+records the writer prompt version and strategy version that produced it.
+
 ## The weekly cycle
 
 ```mermaid
 stateDiagram-v2
     [*] --> research
-    research --> strategy_check
+    research --> strategy_check: weekly memory job re-tests the playbook
     strategy_check --> content_plan: strategy rewritten only on new evidence;<br/>last week's changes ruled on
     content_plan --> drafting: accepted changes applied to the plan
     drafting --> critic: writer and editor loop per piece
@@ -147,7 +172,9 @@ columns added at startup; there is no migration tool yet.
 | `PerformanceRow` | Normalised rows from uploaded analytics exports |
 | `ExperimentRegistration` | Each test's pre-registration and, once judged at its planned sample, its final verdict |
 | `Learnings`, `ChangeDecision` | Weekly learnings and the strategist's ruling on each change |
-| `BrainVersion`, `EditPattern` | Which brain fields changed, and edit patterns on their way to becoming voice rules |
+| `BrainVersion`, `EditPattern` | Which brain fields changed, and recurring edits proposed as voice rules, with each proposal's status |
+| `MemoryPiece` | Content memory: each measured piece with its features, score and embedding |
+| `PlaybookRule`, `RuleEvent` | Each mined pattern, its status, and one history entry per weekly run |
 | `User`, `WorkspaceBudget`, `RoleModel`, `Alert` | Sign-in and workspace access, spending limits, model choices, alerts |
 | `OnboardingJob`, `StrategyComment` | Progress of background work started from the web app |
 

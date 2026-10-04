@@ -61,6 +61,7 @@ from growthcrew.analytics.analysis import analyze  # noqa: E402
 from growthcrew.api.ui import board, review  # noqa: E402
 from growthcrew.brain.store import load_brain  # noqa: E402
 from growthcrew.db.models import Cycle  # noqa: E402
+from growthcrew.memory import playbook  # noqa: E402
 from growthcrew.naming import display, piece_name, plural  # noqa: E402
 from growthcrew.reports.learning_log import learning_log  # noqa: E402
 
@@ -145,9 +146,18 @@ st.caption(
 )
 
 tabs = st.tabs(
-    ["Mission control", "Calendar", "Strategy", "Results", "Brand brain", "How it works", "Evals"]
+    [
+        "Mission control",
+        "Calendar",
+        "Strategy",
+        "Results",
+        "Playbook",
+        "Brand brain",
+        "How it works",
+        "Evals",
+    ]
 )
-mission, calendar, strategy_tab, results, brain_tab, how_tab, evals_tab = tabs
+mission, calendar, strategy_tab, results, playbook_tab, brain_tab, how_tab, evals_tab = tabs
 
 # --- Mission control ---
 
@@ -257,6 +267,19 @@ with calendar:
                 f"**Call to action:** {meta.get('cta', '')}  \n"
                 f"**Hypothesis it tests:** {meta.get('hypothesis', '')}"
             )
+        memory = item.get("memory") or {}
+        if memory.get("examples") or memory.get("rules"):
+            winners, held = memory.get("examples", []), memory.get("rules", [])
+            label = f"Written with {plural(len(winners), 'past winner')} and {plural(len(held), 'playbook rule')}"
+            with st.expander(label):
+                for rule in held:
+                    st.markdown(f"- **Rule:** {rule}")
+                for example in winners:
+                    first_line = example["text"].splitlines()[0]
+                    st.markdown(
+                        f"- **Past winner** ({example['published_on']}, {example['rate_pct']}% "
+                        f"{example['metric']}, {example['score']:.1f}x the brand average): “{first_line}”"
+                    )
         reject, edit, approve = st.columns(3)
         reject.button("Reject", disabled=True, width="stretch")
         edit.button("Edit", disabled=True, width="stretch")
@@ -463,6 +486,64 @@ with results:
                 st.badge(text, color=colour)
                 st.markdown(f"**{change['change']}**")
                 st.write(change["reason"] or change["rationale"])
+
+# --- Playbook ---
+
+with playbook_tab:
+    book = playbook.summary(engine, WORKSPACE)
+    learned = book["learned"]
+    st.subheader("What this brand has learned")
+    st.caption(
+        f"From {plural(book['pieces_remembered'], 'published piece')} and their results, as of "
+        f"{day(book['as_of'])}. Patterns are found by comparing pieces that happened to differ, so "
+        "they are leads, not proof: a rule must hold on two weekly runs to become active, and one "
+        "miss takes it out of use."
+    )
+    found, active, retired = st.columns(3)
+    found.metric(f"Patterns found in {learned['days']} days", learned["found"])
+    active.metric("Still holding", learned["still_active"])
+    retired.metric("Retired", learned["retired"])
+
+    def show_rules(title: str, rows: list[dict], colour: str, empty: str) -> None:
+        st.subheader(title)
+        if not rows:
+            st.caption(empty)
+        for rule in rows:
+            with st.container(border=True):
+                st.badge(display(rule["status"]), color=colour)
+                st.markdown(f"**{rule['statement']}**")
+                sure = "over 99%" if rule["probability"] > 0.99 else f"{rule['probability']:.0%}"
+                st.markdown(
+                    f"+{abs(rule['lift_pct']):.0f}% · {rule['pieces_with']} pieces with it, "
+                    f"{rule['pieces_without']} without · {sure} probability it is real · "
+                    f"found {day(rule['found_on'][:10])}"
+                )
+                with st.expander(f"History ({plural(len(rule['history']), 'weekly run')})"):
+                    st.dataframe(
+                        [{"Week of": day(event["at"][:10]), "Status": display(event["status"]),
+                          "Lift": f"{event['lift_pct']:+.0f}%", "Probability": f"{event['probability']:.0%}",
+                          "Note": event["note"]}
+                         for event in rule["history"]],
+                        hide_index=True, width="stretch",
+                    )  # fmt: skip
+
+    show_rules("Active rules", book["active"], "green",
+               "No rule is holding yet. The writer uses rules only while they are active.")  # fmt: skip
+    show_rules(
+        "Out of use, being watched", book["weakening"] + book["candidate"], "orange", "None."
+    )
+    show_rules("Retired", book["retired"], "gray", "None.")
+
+    st.subheader("Performance by prompt and strategy version")
+    st.caption("Every agent prompt and strategy has a version, so a change can be judged by what followed it. "
+               "This is a before-and-after comparison, not a test.")  # fmt: skip
+    st.dataframe(
+        [{"Writer prompt": row["prompt_version"], "Strategy": f"v{row['strategy_version']}",
+          "Content type": display(row["content_type"]), "Pieces": row["pieces"],
+          "Rate": f"{row['rate_pct']:.2f}%"}
+         for row in book["by_version"]],
+        hide_index=True, width="stretch",
+    )  # fmt: skip
 
 # --- Brand brain ---
 
