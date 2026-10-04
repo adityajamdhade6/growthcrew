@@ -56,7 +56,8 @@ The model writes; code decides what is allowed through.
 | Publish anything | Every draft is created `pending_approval`. One function guards scheduling, export and publishing, and requires a named human's approval. |
 | Use an invented statistic or testimonial | A number or quote that is not in the brand's own proof caps the editor's accuracy score and blocks the draft. |
 | Make an uncited claim about a competitor or market | Research claims whose URL the agent never read are deleted. Customer quotes must be verbatim. |
-| Call a winner on a tiny sample | A two-proportion z-test, Bonferroni-corrected, with a floor of about 100 trials per variant. Below it the answer is "not enough data". |
+| Call a winner early, or on a cherry-picked metric | Tests are pre-registered and judged once, at their planned sample, on their registered metric, by a Bayesian rule (see [docs/experiments.md](docs/experiments.md)). |
+| Accept a winner that hurts a guardrail | A winner that damages cost per click or unsubscribe rate is held for a person. |
 | Treat a guess as a fact | Every brain field is `inferred` until you confirm it, and agents see that tag. |
 | Overspend | A weekly cap per workspace and an optional total cap, checked before every model request. |
 
@@ -66,9 +67,10 @@ From `make eval` (offline; no API key). Full output in `evals/results/scorecard.
 
 | Eval | Result |
 |---|---|
-| Analyst: finds the true winner | 100 of 100 seeded datasets (3 variants), 100 of 100 (2 variants) |
-| Analyst: calls a winner when there is none | 1 of 100 |
-| Analyst: calls a winner on a tiny sample | 0 of 100 |
+| Experiment engine: false winners between identical variants | 4.4% at worst across five scenarios, 2,000 simulated tests each |
+| Experiment engine: right winner at the planned sample | 76 to 78% of 1,000 tests; wrong winner in none |
+| Experiment engine: calls a winner on a tiny sample | 0 of 200 |
+| Bandit against an even budget split | 61% fewer clicks given up over 8 simulated weeks |
 | Analyst: simulated weeks, end to end through CSV ingest | 10 of 10 correct |
 | Guardrails: labelled cases | 28 of 28 (every must-block line blocked, no false blocks) |
 | Golden set (3 brands x 10 requests) | Built; 0 of 30 human reference outputs written yet |

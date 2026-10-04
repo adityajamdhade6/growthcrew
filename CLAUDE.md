@@ -22,7 +22,8 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - `src/growthcrew/tools/`: `fetch.py` (the polite fetcher every network read goes through), `search.py`, `scrape.py`, `crawl.py`, `reviews.py`, `cache.py`, analytics connectors.
 - `src/growthcrew/frameworks/`: one module per marketing framework. Each is a `Framework` (purpose, inputs, pydantic output schema, quality criteria, instructions) rendered through `templates/framework.j2`. Add a framework by adding a module and listing it in `FRAMEWORKS`.
 - `src/growthcrew/content/`: content types (`types.py`), one template per type with best practices and platform limits (`templates.py`), and deterministic draft checks (`checks.py`).
-- `src/growthcrew/analytics/`: CSV ingest and piece matching (`ingest.py`), significance tests (`stats.py`), and the weekly numbers (`analysis.py`). No model calls in this package.
+- `src/growthcrew/experiments/`: the experiment engine (Bayesian A/B/n, decision rule, pre-registration, power, bandit, guardrails, simulations). Standalone: it must not import anything else from GrowthCrew, and a test enforces that.
+- `src/growthcrew/analytics/`: CSV ingest and piece matching (`ingest.py`), registrations and final verdicts (`registry.py`), and the weekly numbers (`analysis.py`). No model calls in this package.
 - `src/growthcrew/reports/`: Markdown and PDF rendering of agent outputs.
 - `src/growthcrew/db/`: SQLModel models and migrations.
 - `evals/`: the regression suite. `golden/` (3 fictional brands x 10 requests), `calibration/` (20 pieces plus human scores), `suites.py` (one function per eval), `judge.py` (fixed rubrics), `run.py` (scorecard).
@@ -45,10 +46,11 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - Scores and totals (ICE, experiment ranking, budget split, quote frequency) are computed or checked in code, not taken from the model.
 - Content may use a statistic, customer name or testimonial only if it is in the brain's proof. `content/checks.py` enforces this, the banned-phrase list and platform length limits; a finding caps the critic's score for that criterion, so the model cannot pass a draft the checks fail.
 - A content piece goes through at most 3 critic rounds and passes only when all six scores are 8 or more. Pieces that do not pass are still saved, marked as such, for the human reviewer.
-- A change backed by a significant A/B winner is accepted by default; a stated risk makes it a partial shift to confirm next week, never a rejection (`strategist.decide_rulings`). Wins seen only across different pieces are always partial.
+- A change backed by a called winner is accepted by default; a stated risk makes it a partial shift to confirm next week, never a rejection (`strategist.decide_rulings`).
 - Every experiment result is shown with its uncertainty: probability the leader is best, a 95% interval on the lift, and the sample size. Never show a bare "wins", and never print 100% for a probability.
 - User-facing text uses `naming.display`, `piece_name` and `plural`; no raw ids or enum values on screen.
-- The analyst interprets statistics; it never computes them. A winner exists only where `analytics.stats.compare` returns `significant`; below the minimum sample the answer is `not_enough_data`. An angle shift without a significant readout behind it is blocked in code and the strategist cannot accept it. Do not lower `MIN_TRIALS` or `ALPHA` to get a result.
+- The analyst interprets statistics; it never computes them. A winner exists only when a pre-registered test, judged once at its planned sample on its registered metric, meets the decision rule in `experiments/decide.py`. Unregistered comparisons are descriptive only. Do not loosen `loss_threshold`, the probability requirement or `MIN_TRIALS` to get a result, and do not let a verdict be recomputed after it is final.
+- A winner that damages a registered guardrail metric is held for a person: the strategist cannot accept it and the bandit does not give it the budget.
 - Analytics rows that cannot be matched to a piece are reported as unmatched, never assigned by guess.
 - A draft with a guardrail violation is `blocked`: it cannot be approved, only rejected or edited until clean. Do not add a way around this.
 - Golden references and calibration scores come from a human. Never fill in `reference`, `approved_by` or `human_score` yourself, and never report a pending or skipped eval as passed.
@@ -68,6 +70,15 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - Run the tests after: `uv run ruff check . && uv run pytest`.
 - After changing any prompt, framework, template, guardrail or statistic, run `make eval` and fix regressions before finishing. `make eval-live` costs money; ask before running it.
 
+## v2 working rules
+
+From the v2 upgrade pack (13 phases). They apply to every phase.
+
+- Start each phase by reading this file and `docs/architecture.md`; update both when the phase ends.
+- One git branch per phase. Merge only when tests and evals pass.
+- After each phase, ask what a senior engineer would criticise, and fix the top 3.
+- The public demo runs on sample data only. Real client data never goes into the demo.
+
 ## Commands
 
 - Install: `uv sync`
@@ -81,6 +92,7 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - Weekly cycle: `uv run growthcrew cycle <workspace>` (or `POST /workspaces/<workspace>/cycles`)
 - Evals: `make eval` (offline, free) and `make eval-live [LIMIT=5]` (calls the model). Scorecard in `evals/results/`.
 - Cost dashboard: `/costs/dashboard?workspace=<workspace>`
+- Experiment engine simulation report (writes charts to `reports/experiments/`): `uv run python -m evals.experiments_report`
 - Simulated week (no API key needed): `uv run python evals/simulate_week.py`
 - API: `uv run uvicorn growthcrew.api.main:app --reload`
 - Web app: `cd web && npm run dev` (set `GROWTHCREW_API_URL` if the API is not on 127.0.0.1:8000); `npm run build` type-checks it

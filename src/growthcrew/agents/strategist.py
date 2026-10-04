@@ -189,19 +189,20 @@ MIN_SHARE = 10
 
 
 def winning_readout(change: ProposedChange, learnings: WeeklyLearnings):
-    """The significant readout, if any, that shows the change's angle winning."""
+    """The pre-registered test, if any, in which the change's angle was called the winner."""
     if change.prefer_angle == "none":
         return None
     readouts = {readout.id: readout for readout in learnings.analysis.readouts}
-    backing = [
-        readouts[ref]
-        for ref in change.evidence
-        if ref in readouts
-        and readouts[ref].status == "significant"
-        and readouts[ref].winner == change.prefer_angle
-    ]
-    # Prefer a controlled test over a comparison across different pieces.
-    return next((r for r in backing if r.kind == "ab_test"), backing[0] if backing else None)
+    return next(
+        (
+            readouts[ref]
+            for ref in change.evidence
+            if ref in readouts
+            and readouts[ref].status == "significant"
+            and readouts[ref].winner == change.prefer_angle
+        ),
+        None,
+    )
 
 
 def decide_rulings(
@@ -209,9 +210,10 @@ def decide_rulings(
 ) -> tuple[list[Ruling], list[ProposedChange]]:
     """Apply the decision rule to the strategist's rulings.
 
-    A confident winner is accepted unless a specific risk is stated, in which case a partial
-    shift is accepted and flagged for confirmation next week. Returns the final rulings and
-    the changes as they will be applied (a partial shift has a smaller share).
+    A called winner is accepted unless a specific risk is stated, in which case a partial
+    shift is accepted and flagged for confirmation next week. A winner that damages a
+    guardrail metric is held for a person. Returns the final rulings and the changes as they
+    will be applied (a partial shift has a smaller share).
     """
     by_id = {ruling.change_id: ruling for ruling in proposed}
     rulings, changes = [], []
@@ -227,14 +229,21 @@ def decide_rulings(
             final = raw or Ruling(
                 change_id=change.id, decision="rejected", reason="The strategist gave no ruling"
             )
+        elif readout.guardrail_flags:
+            final = Ruling(
+                change_id=change.id, decision="held",
+                reason=f"Held for the owner: {readout.winner} won {readout.title or readout.name} "
+                f"on {readout.metric}, but it hurts a guardrail. "
+                + " ".join(readout.guardrail_flags),
+            )  # fmt: skip
         else:
+            sure = readout.uncertainty.prob_best[readout.winner]
+            likely = "over 99.9%" if sure > 0.999 else f"{sure:.1%}"
             won = (
                 f"{readout.winner} won {readout.title or readout.name} "
-                f"(+{readout.lift_pct}% over the runner-up, p={readout.p_value})"
+                f"(+{readout.lift_pct:.0f}% over the runner-up, {likely} likely to be best)"
             )
             risk = raw.risk.strip() if raw else ""
-            if readout.kind == "observational" and not risk:
-                risk = "the comparison is across different pieces, not a controlled test"
             said = f" The strategist's view: {raw.reason}" if raw and raw.reason else ""
             if risk:
                 share = max(MIN_SHARE, round(change.share_pct * PARTIAL_FRACTION))

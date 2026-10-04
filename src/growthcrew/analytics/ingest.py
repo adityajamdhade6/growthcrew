@@ -28,6 +28,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "sends": ("sent", "sends", "recipients", "delivered", "emails sent"),
     "opens": ("opens", "unique opens", "opened"),
     "replies": ("replies", "replied", "responses"),
+    "unsubscribes": ("unsubscribes", "unsubscribed", "unsubs", "opt-outs"),
     "spend": ("spend", "cost", "amount spent", "amount spent (usd)"),
 }
 # Columns that identify the item, in the order they are tried.
