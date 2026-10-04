@@ -18,6 +18,7 @@ dependencies = [
     "jinja2",
     "fpdf2>=2.8.9",
     "markdown>=3.11",
+    "streamlit>=1.65.0",
 ]
 
 [project.scripts]
@@ -63,3 +64,4 @@ extend-immutable-calls = ["fastapi.Depends"]
 "src/growthcrew/pilot.py" = ["E501"]
 "tests/test_pilot.py" = ["E501"]
 "tests/test_hardening.py" = ["E501"]
+"streamlit_app.py" = ["E501"]

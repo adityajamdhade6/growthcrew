@@ -121,6 +121,9 @@ uv run growthcrew onboard --url https://your-business.com
 uv run growthcrew cycle your-business
 ```
 
+There is also a read-only Streamlit demo of the sample brand, for hosting on Streamlit
+Community Cloud: `uv run streamlit run streamlit_app.py`.
+
 Checks: `make lint`, `make test`, `make eval`. `render.yaml` is a deploy blueprint for a public
 demo with a spending cap; it has not been deployed.
 
