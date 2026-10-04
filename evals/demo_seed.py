@@ -17,10 +17,11 @@ from growthcrew import budget
 from growthcrew.agents.learning_models import (
     Finding,
     ProposedChange,
+    Ruling,
     TargetStatus,
     WeeklyLearnings,
 )
-from growthcrew.agents.strategist import build_evidence, check
+from growthcrew.agents.strategist import build_evidence, check, decide_rulings
 from growthcrew.agents.strategy_models import (
     KPI,
     Change,
@@ -350,10 +351,36 @@ def main() -> None:
         return
     brain = LOOMHOUSE.model_copy(deep=True, update={"workspace": WORKSPACE})
     # Leave a few fields unconfirmed so the review screen has something to do.
-    for path, note in (("icp.objections", "implied by FAQ copy"), ("icp.buying_triggers", "a guess"),
-                       ("competitors", "named once on a comparison page")):  # fmt: skip
-        brain.fields[path] = FieldMeta(status="inferred", confidence="low", note=note)
-    brain.fields["business.geography"] = FieldMeta(confidence="medium", note="shipping page")
+    site = brain.source_url
+    for path, confidence, note, page in (
+        (
+            "icp.objections",
+            "low",
+            "Implied by the questions the FAQ answers, not stated by customers",
+            "/faq",
+        ),
+        (
+            "icp.buying_triggers",
+            "low",
+            "Inferred from seasonal blog posts and the registry page",
+            "/blog",
+        ),
+        (
+            "competitors",
+            "low",
+            "Each is named once, on the linen comparison page",
+            "/blog/linen-vs-cotton",
+        ),
+        (
+            "business.geography",
+            "medium",
+            "Taken from the shipping page; no mention of other countries",
+            "/shipping",
+        ),
+    ):
+        brain.fields[path] = FieldMeta(
+            status="inferred", confidence=confidence, note=note, source_urls=[f"{site}{page}"]
+        )
     brain = save_brain(brain, note="demo seed", engine=engine)
 
     research = research_fixture(brain)
@@ -391,21 +418,36 @@ def main() -> None:
                       created_at=now - timedelta(minutes=14))  # fmt: skip
         session.add(cycle)
         session.flush()
-        for change, decision, reason in zip(
-            changes, ("accepted", "rejected", "accepted"),
-            ("One week of data, but the gap is large and the shift is partial",
-             "Ads are already A/B tested by angle each week; no plan change is needed",
-             "Agreed: no winner should be called at this sample size"), strict=True,
-        ):  # fmt: skip
+        # What the strategist model might say; the decision rule in code has the last word.
+        said = [
+            Ruling(
+                change_id="c1",
+                decision="accepted",
+                reason="The gap is large and consistent across posts",
+            ),
+            Ruling(
+                change_id="c2",
+                decision="rejected",
+                reason="Ads are already A/B tested by angle each week",
+                risk="the result rests on a single week of data",
+            ),
+            Ruling(
+                change_id="c3",
+                decision="accepted",
+                reason="No winner should be called at this sample size",
+            ),
+        ]
+        rulings, applied = decide_rulings(learnings, said)
+        for ruling, change in zip(rulings, applied, strict=True):
             session.add(ChangeDecision(workspace=WORKSPACE, learnings_id=row.id, cycle_id=cycle.id,
-                                       change_json=change.model_dump_json(), decision=decision,
-                                       reason=reason))  # fmt: skip
+                                       change_json=change.model_dump_json(),
+                                       decision=ruling.decision, reason=ruling.reason))  # fmt: skip
         steps = [
             ("research", "done", "14 cited claims from 9 sources; 2 sources not seen in the previous research", [("research", 9, 61200, 5400, 0.41)]),
-            ("strategy_check", "done", "Strategist accepted 2 of 3 changes from last week's learnings", [("strategist", 1, 8300, 900, 0.05)]),
-            ("content_plan", "done", "5 items planned: ad, linkedin_post, newsletter, landing_hero, linkedin_post. Applied from learnings: 1 of 2 eligible pieces moved to the outcome angle", [("content", 1, 6100, 700, 0.04)]),
-            ("drafting", "done", "7 pieces written in 11 writer/critic rounds", [("content", 11, 70400, 9800, 0.48), ("critic", 11, 52800, 6100, 0.33)]),
-            ("critic", "done", "5 of 7 pieces scored 8+ on every criterion; flagged for the reviewer: 03-day03-newsletter; blocked by guardrails: 01-day01-ad-pain", [("orchestrator", 0, 0, 0, 0.0)]),
+            ("strategy_check", "done", "Strategist accepted 3 of 3 changes from last week's learnings (2 in part, to confirm next week)", [("strategist", 1, 8300, 900, 0.05)]),
+            ("content_plan", "done", "5 items planned: ad, LinkedIn post, newsletter, landing page hero, LinkedIn post. Applied from learnings: 1 of 2 eligible pieces moved to the outcome angle", [("content", 1, 6100, 700, 0.04)]),
+            ("drafting", "done", "7 pieces written in 11 writer and editor rounds", [("content", 11, 70400, 9800, 0.48), ("critic", 11, 52800, 6100, 0.33)]),
+            ("critic", "done", "5 of 7 pieces scored 8 or more on every criterion; flagged for the reviewer: Day 3 newsletter; blocked by guardrails: Day 1 ad (pain angle)", [("orchestrator", 0, 0, 0, 0.0)]),
         ]  # fmt: skip
         for index, (stage, status, detail, runs) in enumerate(steps):
             started = cycle.created_at + timedelta(minutes=index * 2.5)

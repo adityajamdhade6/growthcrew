@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api, ApiError, useApi } from "@/lib/api";
-import { label, money, useSession } from "@/lib/session";
+import { label, money, plural, useSession } from "@/lib/session";
 import { Badge, Button, Card, Empty, ErrorState, Loading, Notice, PageHeader, SectionTitle, statusTone } from "@/components/ui";
 
 type AgentRun = { agent: string; llm_calls: number; input_tokens: number; output_tokens: number; cost_usd: number };
@@ -146,7 +146,7 @@ export default function MissionControl() {
               </div>
               <p className="mt-2 flex-1 text-sm text-muted">{state.step?.detail || member.does}</p>
               <p className="mt-3 border-t border-line pt-2 text-xs tabular-nums text-muted">
-                {calls} model calls · {money(cost)}
+                {plural(calls, "model call")} · {money(cost)}
               </p>
             </Card>
           );
@@ -180,7 +180,7 @@ export default function MissionControl() {
                     {step?.detail && <p className="mt-1 text-sm text-muted">{step.detail}</p>}
                     {step?.agents.filter((run) => run.llm_calls > 0).map((run) => (
                       <p key={run.agent} className="mt-1 text-xs tabular-nums text-muted">
-                        {label(run.agent)}: {run.llm_calls} calls · {(run.input_tokens + run.output_tokens).toLocaleString()} tokens · {money(run.cost_usd)}
+                        {label(run.agent)}: {plural(run.llm_calls, "model call")} · {plural(run.input_tokens + run.output_tokens, "token")} · {money(run.cost_usd)}
                       </p>
                     ))}
                   </div>

@@ -54,6 +54,12 @@ def learning_log(engine: Engine, workspace: str) -> list[dict]:
                         if change["id"] in rulings
                         else "pending",
                         "reason": rulings[change["id"]].reason if change["id"] in rulings else "",
+                        # The share actually applied, which is smaller for a partial shift.
+                        "applied_share_pct": json.loads(rulings[change["id"]].change_json)[
+                            "share_pct"
+                        ]
+                        if change["id"] in rulings
+                        else None,
                     }
                     for change in data["changes"]
                 ],

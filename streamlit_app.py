@@ -7,13 +7,23 @@ full app shows. Everything on screen is invented sample data; nothing here calls
 there are no approve or publish actions. The full app is the Next.js + FastAPI one in web/.
 """
 
-import json
+import math
 import os
 import tempfile
+from datetime import date
 
+import altair as alt
 import streamlit as st
 
-st.set_page_config(page_title="GrowthCrew demo", page_icon="📈", layout="wide")
+AUTHOR = "Aditya Jamdhade"
+REPO = "https://github.com/adityajamdhade6/growthcrew"
+CASE_STUDY = f"{REPO}/blob/main/docs/case_study.md"
+
+# Chart colours: one hue. The winner takes the full colour; the rest a lighter step of it.
+SERIES = "#2a78d6"
+SERIES_QUIET = "#9cc0ec"
+
+st.set_page_config(page_title="GrowthCrew demo", page_icon="📈", layout="centered")
 
 
 @st.cache_resource
@@ -32,6 +42,15 @@ def load_demo():
     return get_engine(), WORKSPACE
 
 
+@st.cache_data
+def scorecard():
+    """The offline evals, run once when the demo starts."""
+    from evals.run import run
+
+    results, _ = run(live=False, limit=None)
+    return [result.model_dump() for result in results], date.today().isoformat()
+
+
 engine, WORKSPACE = load_demo()
 
 from sqlmodel import Session, select  # noqa: E402
@@ -42,27 +61,94 @@ from growthcrew.analytics.analysis import analyze  # noqa: E402
 from growthcrew.api.ui import board, review  # noqa: E402
 from growthcrew.brain.store import load_brain  # noqa: E402
 from growthcrew.db.models import Cycle  # noqa: E402
+from growthcrew.naming import display, piece_name, plural  # noqa: E402
 from growthcrew.reports.learning_log import learning_log  # noqa: E402
 
+TEAM = {
+    "research": "Researcher",
+    "strategist": "Strategist",
+    "content": "Writer",
+    "critic": "Editor",
+}
+STAGES = {
+    "research": "Research refresh",
+    "strategy_check": "Strategy check",
+    "content_plan": "Content plan",
+    "drafting": "Drafting",
+    "critic": "Editor's quality gate",
+}
+STATUS_BADGE = {
+    "pending_approval": ("Needs approval", "orange"),
+    "blocked": ("Blocked by a guardrail", "red"),
+    "scheduled": ("Approved and scheduled", "green"),
+    "approved": ("Approved", "green"),
+    "rejected": ("Rejected", "gray"),
+}
+DECISIONS = {
+    "accepted": ("Accepted", "green"),
+    "accepted_partial": ("Accepted in part", "orange"),
+    "rejected": ("Rejected", "red"),
+    "pending": ("Awaiting a ruling", "gray"),
+}
 
-def nice(value: str) -> str:
-    names = {"linkedin_post": "LinkedIn post", "landing_hero": "Landing page hero",
-             "pending_approval": "Needs approval", "ai_cliche": "No clichés"}  # fmt: skip
-    return names.get(value, value.replace("_", " ").capitalize())
+
+def evidence_name(ref: str) -> str:
+    kind, _, rest = ref.partition(":")
+    if kind == "brain":
+        return f"Brand brain: {rest.split('.')[-1].replace('_', ' ')}"
+    return {"learning": f"Research learning {rest}", "claim": f"Research finding {rest}",
+            "voc": "Customer quotes"}.get(kind, ref)  # fmt: skip
+
+
+def chance(probability: float) -> str:
+    """A probability as text, without claiming certainty the data cannot give."""
+    if probability > 0.999:
+        return "Over 99.9%"
+    return f"{probability:.0%}"
+
+
+def day(value: str) -> str:
+    return f"{date.fromisoformat(value):%-d %b %Y}"
+
+
+def bar_chart(rows: list[dict], x_title: str, step: float = 0.5, quiet: bool = False) -> alt.Chart:
+    """Horizontal bars for one measure: value labels on the bars, ticks every `step`.
+
+    `rows` have label, value, text and highlight. Highlighted bars take the full colour.
+    """
+    top = max(row["value"] for row in rows)
+    limit = math.ceil(top * 1.35 / step) * step
+    ticks = [round(index * step, 2) for index in range(int(limit / step) + 1)]
+    base = alt.Chart(alt.Data(values=rows)).encode(
+        y=alt.Y("label:N", sort=None, title=None, axis=alt.Axis(labelLimit=220)),
+        x=alt.X("value:Q", title=x_title, scale=alt.Scale(domain=[0, limit]),
+                axis=alt.Axis(values=ticks, format=".1f", grid=True)),
+        tooltip=[alt.Tooltip("label:N", title="Variant"), alt.Tooltip("text:N", title="Result")],
+    )  # fmt: skip
+    colour = alt.value("#b9bfc9") if quiet else alt.condition(
+        "datum.highlight", alt.value(SERIES), alt.value(SERIES_QUIET)
+    )  # fmt: skip
+    bars = base.mark_bar(cornerRadiusEnd=4, size=20).encode(color=colour)
+    labels = base.mark_text(align="left", dx=6, fontSize=12).encode(text="text:N")
+    return (bars + labels).properties(height=44 * len(rows) + 30)
 
 
 st.title("GrowthCrew")
-st.caption("An AI marketing team for small businesses, where a human approves every output.")
-st.info(
-    "**Sample data, read-only.** The brand (Loomhouse), its drafts, scores, costs and results "
-    "are invented to show the product. The system has not yet run for a real business. "
-    "The full app with approve, edit and reject is in the "
-    "[repo](https://github.com/adityajamdhade6/growthcrew)."
+st.markdown(
+    "An AI marketing team for small businesses, where a human approves every output.  \n"
+    f"Built by **{AUTHOR}** · [GitHub repo]({REPO}) · [Case study]({CASE_STUDY})"
+)
+st.caption(
+    "Sample data, read-only. The brand (Loomhouse) and every number here are invented to show "
+    "the product; it has not yet run for a real business."
 )
 
-mission, calendar, strategy_tab, results, brain_tab = st.tabs(
-    ["Mission control", "Calendar and review", "Strategy", "Results and learnings", "Brand brain"]
+tabs = st.tabs(
+    ["Mission control", "Calendar", "Strategy", "Results", "Brand brain", "How it works", "Evals"]
 )
+mission, calendar, strategy_tab, results, brain_tab, how_tab, evals_tab = tabs
+
+# --- Mission control ---
 
 with mission:
     with Session(engine) as session:
@@ -70,170 +156,410 @@ with mission:
             select(Cycle).where(Cycle.workspace == WORKSPACE).order_by(Cycle.id.desc())
         ).first()
     data = timeline(engine, cycle.id)
-    waiting = len(data["awaiting_approval"])
-    a, b, c = st.columns(3)
-    a.metric("Cost so far this cycle", f"${data['live_cost_usd']:.2f}")
-    b.metric("Weekly budget", f"${data['weekly_limit_usd']:.0f}",
-             f"${data['weekly_spend_usd']:.2f} spent", delta_color="off")  # fmt: skip
-    c.metric("Drafts waiting for approval", waiting)
-    st.warning(
-        f"{waiting} drafts are waiting for a human. Nothing is scheduled or published until "
-        f"they are approved. {len(data['blocked_by_guardrails'])} more blocked by a guardrail."
+    waiting, blocked = len(data["awaiting_approval"]), len(data["blocked_by_guardrails"])
+
+    with st.container(border=True):
+        st.markdown(f"#### {plural(waiting, 'draft')} waiting for the owner's approval")
+        st.write(
+            "The team has finished its part of this week's cycle. Nothing is scheduled or "
+            f"published until a person approves it. {plural(blocked, 'more draft')} "
+            f"{'was' if blocked == 1 else 'were'} blocked by a guardrail."
+        )
+    cost, budget = st.columns(2)
+    cost.metric("Model cost so far this cycle", f"${data['live_cost_usd']:.2f}")
+    budget.metric("Weekly budget", f"${data['weekly_limit_usd']:.0f}")
+    budget.progress(
+        min(1.0, data["weekly_spend_usd"] / data["weekly_limit_usd"]),
+        text=f"${data['weekly_spend_usd']:.2f} spent. The team stops if the limit is reached.",
     )
-    st.subheader("What each agent did")
+
+    st.subheader("The team")
+    runs = [run for step in data["steps"] for run in step["agents"]]
+    for column, (agent, name) in zip(st.columns(4), TEAM.items(), strict=True):
+        mine = [run for run in runs if run["agent"] == agent]
+        with column, st.container(border=True):
+            st.markdown(f"**{name}**")
+            st.badge("Done", color="green")
+            st.caption(f"{plural(sum(r['llm_calls'] for r in mine), 'model call')} · "
+                       f"${sum(r['cost_usd'] for r in mine):.2f}")  # fmt: skip
+
+    st.subheader("This week, step by step")
     for step in data["steps"]:
-        runs = [run for run in step["agents"] if run["llm_calls"]]
-        cost = sum(run["cost_usd"] for run in runs)
         with st.container(border=True):
-            st.markdown(f"**{nice(step['stage'])}** · {step['status']} · ${cost:.2f}")
+            head, state = st.columns([4, 1])
+            head.markdown(f"**{STAGES.get(step['stage'], display(step['stage']))}**")
+            state.badge(
+                display(step["status"]), color="green" if step["status"] == "done" else "gray"
+            )
             st.write(step["detail"])
-            for run in runs:
-                tokens = run["input_tokens"] + run["output_tokens"]
-                st.caption(f"{nice(run['agent'])}: {run['llm_calls']} model calls, "
-                           f"{tokens:,} tokens, ${run['cost_usd']:.2f}")  # fmt: skip
-    st.caption("Next stages need a person: awaiting approval → scheduled → published → measured.")
+            for run in step["agents"]:
+                if run["llm_calls"]:
+                    tokens = run["input_tokens"] + run["output_tokens"]
+                    st.caption(f"{TEAM.get(run['agent'], display(run['agent']))}: "
+                               f"{plural(run['llm_calls'], 'model call')}, {plural(tokens, 'token')}, "
+                               f"${run['cost_usd']:.2f}")  # fmt: skip
+    with st.container(border=True):
+        head, state = st.columns([4, 1])
+        head.markdown("**Human approval**")
+        state.badge("Waiting on the owner", color="orange")
+        st.write(
+            "Then scheduled, published by the owner, and measured. None of these happen on their own."
+        )
+
+# --- Calendar and review ---
 
 with calendar:
-    drafts = [d for d in board(WORKSPACE, engine)["drafts"] if d["status"] != "published"]
-    left, right = st.columns([1, 2])
+    drafts = [
+        d
+        for d in board(WORKSPACE, engine)["drafts"]
+        if d["status"] not in ("published", "measured")
+    ]
+    drafts.sort(key=lambda d: (d["date"], d["id"]))
+    names = {d["id"]: piece_name(d["piece"]) for d in drafts}
+    captions = [
+        f"{date.fromisoformat(d['date']):%a %d %b} · {STATUS_BADGE.get(d['status'], (display(d['status']),))[0]}"
+        for d in drafts
+    ]
+    left, right = st.columns([2, 3], gap="large")
     with left:
-        st.subheader("This week")
-        labels = {
-            d["id"]: f"{d['date'][5:]} · {nice(d['content_type'])}"
-            + (f" · {nice(d['angle'])}" if d["angle"] else "")
-            + f" · {nice(d['status'])}"
-            for d in drafts
-        }
-        chosen = st.radio(
-            "Draft", list(labels), format_func=labels.get, label_visibility="collapsed"
-        )
+        st.subheader("This week's drafts")
+        first = next((i for i, d in enumerate(drafts) if d["status"] == "pending_approval"), 0)
+        chosen = st.radio("Draft", list(names), index=first, format_func=names.get,
+                          captions=captions, label_visibility="collapsed")  # fmt: skip
     with right:
         item = review(chosen, engine)
-        st.subheader(
-            nice(item["content_type"])
-            + (f" · {nice(item['angle'])} angle" if item["angle"] else "")
-        )
+        status = item["calendar"]["status"] if item["calendar"] else item["status"]
+        text, colour = STATUS_BADGE.get(status, (display(status), "gray"))
+        st.subheader(names[chosen])
+        st.badge(text, color=colour)
         if item["violations"]:
-            st.error("Blocked by a guardrail; it cannot be approved as written. "
-                     + "; ".join(f"line {v['line']}: {v['reason']} (“{v['excerpt']}”)"
-                                 for v in item["violations"]))  # fmt: skip
-        st.code(item["text"], language=None, wrap_lines=True)
+            st.error(
+                "This draft cannot be approved as written. "
+                + " ".join(f"Line {v['line']}: {v['reason'].lower()} (“{v['excerpt']}”)."
+                           for v in item["violations"])
+            )  # fmt: skip
+        with st.container(border=True):
+            st.markdown(item["text"].replace("\n", "  \n"))
         if item["first_draft"]:
-            with st.expander("First draft, before the editor"):
-                st.code(item["first_draft"], language=None, wrap_lines=True)
+            with st.expander("See the first draft, before the editor's changes"):
+                st.markdown(item["first_draft"].replace("\n", "  \n"))
         if item["scores"]:
-            st.markdown("**Editor's scores** (8 or more passes)")
-            columns = st.columns(3)
+            st.markdown("**Editor's scores** · 8 or more on every line passes")
+            columns = st.columns(2)
             for index, (name, score) in enumerate(item["scores"].items()):
-                columns[index % 3].progress(score / 10, text=f"{nice(name)}: {score}/10")
+                columns[index % 2].progress(score / 10, text=f"{display(name)} · {score}/10")
         meta = item["metadata"]
-        st.markdown(
-            f"- **Serves pillar:** {meta.get('messaging_pillar', '')}\n"
-            f"- **Written for:** {meta.get('target_persona', '')}\n"
-            f"- **Call to action:** {meta.get('cta', '')}\n"
-            f"- **Tests the hypothesis:** {meta.get('hypothesis', '')}"
-        )
-        st.caption(
-            "In the full app this panel has Approve, Edit and Reject. This demo is read-only."
-        )
+        with st.expander("Why this piece exists", expanded=True):
+            st.markdown(
+                f"**Messaging pillar:** {meta.get('messaging_pillar', '')}  \n"
+                f"**Written for:** {meta.get('target_persona', '')}  \n"
+                f"**Call to action:** {meta.get('cta', '')}  \n"
+                f"**Hypothesis it tests:** {meta.get('hypothesis', '')}"
+            )
+        reject, edit, approve = st.columns(3)
+        reject.button("Reject", disabled=True, width="stretch")
+        edit.button("Edit", disabled=True, width="stretch")
+        approve.button("Approve", disabled=True, type="primary", width="stretch")
+        st.caption("These work in the full app. This demo is read-only.")
+
+# --- Strategy ---
 
 with strategy_tab:
     doc = load_latest_strategy(WORKSPACE)
     evidence = {item.id: item for item in doc.evidence}
 
-    def support(ids):
-        return " ".join(f"`{ref}`" for ref in ids) or "`no supporting evidence`"
+    def support(refs: list[str]) -> str:
+        if not refs:
+            return ":red-badge[No supporting evidence]"
+        return " ".join(
+            f":{'orange' if evidence[ref].quality.startswith('inferred') else 'gray'}-badge[{evidence_name(ref)}"
+            f"{' · unconfirmed' if evidence[ref].quality.startswith('inferred') else ''}]"
+            for ref in refs
+        )
 
     st.subheader("Positioning")
-    st.markdown(f"### {doc.positioning.positioning_statement}")
+    st.markdown(f"#### {doc.positioning.positioning_statement}")
+
     st.subheader("Messaging house")
-    st.success(doc.messaging_house.core_message.text)
-    for column, pillar in zip(st.columns(3), doc.messaging_house.pillars, strict=False):
-        with column, st.container(border=True):
+    st.success(f"**Core message:** {doc.messaging_house.core_message.text}")
+    for pillar in doc.messaging_house.pillars:
+        with st.container(border=True):
             st.markdown(f"**{pillar.message}**")
             for point in pillar.proof_points:
-                st.write(f"{point.text} {support(point.support)}")
+                st.markdown(f"{point.text}  \n{support(point.support)}")
+
     st.subheader("90-day channel plan")
-    st.dataframe(
-        [{"Stage": nice(stage.stage), "Channel": play.channel, "Tactic": play.tactic,
-          "Timing": play.timing, "Budget %": play.budget_pct}
-         for stage in doc.channel_plan.stages for play in stage.channels],
-        hide_index=True, width="stretch",
-    )  # fmt: skip
+    spans = {
+        "days 1-30": (1, 30),
+        "days 31-60": (31, 60),
+        "days 61-90": (61, 90),
+        "all 90 days": (1, 90),
+    }
+    plays = [
+        {"channel": play.channel, "start": spans[play.timing][0], "end": spans[play.timing][1],
+         "label": f"{play.budget_pct}% of budget · {display(stage.stage)}",
+         "tactic": play.tactic, "stage": display(stage.stage), "budget": f"{play.budget_pct}%"}
+        for stage in doc.channel_plan.stages for play in stage.channels
+    ]  # fmt: skip
+    if not plays:
+        st.warning("The strategy has no channel plan yet.")
+    else:
+        plan = alt.Chart(alt.Data(values=plays)).encode(
+            y=alt.Y("channel:N", sort=None, title=None, axis=alt.Axis(labelLimit=160)),
+            x=alt.X("start:Q", title="Day of the plan", scale=alt.Scale(domain=[1, 90]),
+                    axis=alt.Axis(values=[1, 30, 60, 90], grid=True)),
+            tooltip=[alt.Tooltip("channel:N", title="Channel"), alt.Tooltip("tactic:N", title="Tactic"),
+                     alt.Tooltip("stage:N", title="Funnel stage"), alt.Tooltip("budget:N", title="Budget")],
+        )  # fmt: skip
+        bars = plan.mark_bar(cornerRadius=4, size=24, color=SERIES).encode(x2="end:Q")
+        labels = plan.mark_text(align="left", dx=6, color="white", fontSize=12).encode(
+            text="label:N"
+        )
+        st.altair_chart((bars + labels).properties(height=52 * len(plays) + 30), width="stretch")
+        for play in plays:
+            st.markdown(
+                f"- **{play['channel']}** ({play['stage'].lower()}, {play['budget']}): {play['tactic']}"
+            )
+
     st.subheader("Experiments, ranked by ICE")
     for number, experiment in enumerate(doc.experiments, 1):
-        with st.expander(f"{number}. {experiment.name} (ICE {experiment.ice})"):
+        with st.expander(f"{number}. {experiment.name} · ICE {experiment.ice}"):
             st.write(experiment.hypothesis)
-            st.caption(f"Metric: {experiment.metric} · Minimum sample: {experiment.minimum_sample} · "
-                       f"{experiment.decision_rule}")  # fmt: skip
-            st.markdown(f"Evidence: {support(experiment.support)}")
+            st.markdown(
+                f"**Metric:** {experiment.metric}  \n**Minimum sample:** {experiment.minimum_sample}  \n"
+                f"**Decision rule:** {experiment.decision_rule}  \n{support(experiment.support)}"
+            )
+
     st.subheader("Devil's advocate review")
     st.write(doc.critique.summary)
     for change in doc.revision.changes:
         st.markdown(
-            f"- **{nice(change.decision)}:** {change.critique_issue}. _{change.change_made}_"
+            f"- **{display(change.decision)}:** {change.critique_issue}. _{change.change_made}_"
         )
-    with st.expander(f"Evidence the strategy cites ({len(evidence)} items)"):
-        for item in evidence.values():
-            st.markdown(
-                f"`{item.id}` {item.text[:200]}" + (f" _({item.quality})_" if item.quality else "")
-            )
+
+# --- Results ---
 
 with results:
     analysis = analyze(engine, WORKSPACE)
-    st.caption(f"Week of {analysis.window_start} to {analysis.window_end} · "
-               f"{analysis.rows_used} rows matched to a piece")  # fmt: skip
+    readouts = analysis.readouts
+    st.caption(
+        f"Week of {day(analysis.window_start)} to {day(analysis.window_end)} · "
+        f"{plural(analysis.rows_used, 'row')} of uploaded data matched to a piece"
+    )
+
     st.subheader("Click-through rate by angle")
-    by_angle = {nice(row.value): row.rate_pct for row in analysis.performance
-                if row.dimension == "angle" and row.metric == "click-through rate"}  # fmt: skip
-    st.bar_chart(by_angle, horizontal=True, y_label="", x_label="Click-through rate (%)")
-    st.caption("Descriptive only. The experiment results below say whether a gap is real.")
+    winners = {
+        r.winner for r in readouts if r.status == "significant" and r.metric == "click-through rate"
+    }
+    angles = sorted(
+        (
+            row
+            for row in analysis.performance
+            if row.dimension == "angle" and row.metric == "click-through rate"
+        ),
+        key=lambda row: -row.rate_pct,
+    )
+    st.altair_chart(
+        bar_chart(
+            [{"label": display(row.value), "value": row.rate_pct, "highlight": row.value in winners,
+              "text": f"{row.rate_pct:.2f}%" + (" · winner" if row.value in winners else "")}
+             for row in angles],
+            "Click-through rate (%)",
+        ),
+        width="stretch",
+    )  # fmt: skip
+    st.caption(
+        "All pieces pooled, so this is descriptive. The tests below say whether a gap is real."
+    )
+
     st.subheader("Experiment results")
-    for readout in analysis.readouts:
-        name = readout.name.split("-")[-1] if readout.kind == "ab_test" else readout.name
+    for readout in readouts:
+        u = readout.uncertainty
+        leader = display(u.leader)
+        unit = {"click-through rate": "impression", "conversion rate": "session"}.get(
+            readout.metric, "send"
+        )
+        facts = (
+            f"{chance(u.prob_best[u.leader])} probability that {leader.lower()} is the best variant · "
+            f"lift over the runner-up {readout.lift_pct or 0:+.0f}% "
+            f"(95% interval {u.lift_low_pct:+.0f}% to {u.lift_high_pct:+.0f}%) · "
+            f"sample: {plural(u.sample_size, unit)}"
+        )
+        kind = "A/B test" if readout.kind == "ab_test" else "Comparison across different pieces"
         with st.container(border=True):
-            arms = ", ".join(f"{nice(arm['label'])} {arm['rate_pct']}% ({arm['successes']}/{arm['trials']})"
-                             for arm in readout.arms)  # fmt: skip
-            if readout.status == "significant":
-                st.markdown(f"**{nice(name)}** · :green[{nice(readout.winner)} wins], "
-                            f"+{readout.lift_pct}% over the runner-up")  # fmt: skip
+            st.markdown(f"**{readout.title}** · {kind} · {readout.metric}")
+            if readout.status == "significant" and readout.kind == "ab_test":
+                st.badge(f"{leader} wins", color="green")
+            elif readout.status == "significant":
+                st.badge(f"{leader} leads · not a controlled test", color="blue")
             elif readout.status == "not_enough_data":
-                st.markdown(f"**{nice(name)}** · :orange[Not enough data yet]. Too early to call, "
-                            "whatever the rates suggest.")  # fmt: skip
+                st.badge("Too early to call", color="orange")
             else:
-                st.markdown(f"**{nice(name)}** · No real difference")
-            st.caption(f"{nice(readout.metric)}: {arms}")
+                st.badge("No real difference", color="gray")
+            if readout.status == "not_enough_data":
+                facts = (
+                    f"{chance(u.prob_best[u.leader])} probability that {leader.lower()} is the best variant · "
+                    f"95% interval on its lift: {u.lift_low_pct:+.0f}% to {u.lift_high_pct:+.0f}%, which "
+                    f"includes zero · sample: only {plural(u.sample_size, unit)}"
+                )
+            st.markdown(facts)
+            st.altair_chart(
+                bar_chart(
+                    [{"label": display(arm["label"]), "value": arm["rate_pct"],
+                      "highlight": arm["label"] == readout.winner,
+                      "text": f"{arm['rate_pct']:.2f}%  ({arm['successes']:,} of {arm['trials']:,})"}
+                     for arm in readout.arms],
+                    f"{display(readout.metric)} (%)",
+                    step=0.5 if max(a["rate_pct"] for a in readout.arms) < 5 else 2.5,
+                    quiet=readout.status != "significant",
+                ),
+                width="stretch",
+            )  # fmt: skip
+            if readout.kind == "observational":
+                st.caption(
+                    "Different pieces differ in topic and timing, so treat this as a lead to confirm."
+                )
+
     st.subheader("Learning log")
+    st.caption("Each week the analyst proposes changes and the strategist rules on each. A confident "
+               "test winner is accepted by default; a stated risk makes it a partial shift.")  # fmt: skip
     for entry in learning_log(engine, WORKSPACE):
         if entry["kind"] != "learnings":
             continue
-        st.markdown(f"**Week of {entry['window']}**")
+        start, _, end = entry["window"].partition(" to ")
+        st.markdown(f"**Week of {day(start)} to {day(end)}**")
         for change in entry["changes"]:
-            colour = "green" if change["decision"] == "accepted" else "red"
-            st.markdown(f"- :{colour}[{nice(change['decision'])}] {change['change']}  \n"
-                        f"  _{change['reason']}_")  # fmt: skip
+            text, colour = DECISIONS[change["decision"]]
+            with st.container(border=True):
+                st.badge(text, color=colour)
+                st.markdown(f"**{change['change']}**")
+                st.write(change["reason"] or change["rationale"])
+
+# --- Brand brain ---
 
 with brain_tab:
     brain = load_brain(WORKSPACE)
     confirmed = sum(meta.status == "confirmed" for meta in brain.fields.values())
-    st.progress(
-        confirmed / len(brain.fields),
-        text=f"{confirmed} of {len(brain.fields)} fields confirmed by the owner",
-    )
-    st.caption("Fields drafted from the website stay 'inferred' until a person confirms them, and "
-               "the agents treat them as assumptions.")  # fmt: skip
-    rows = []
-    for path, meta in brain.fields.items():
-        value = brain.get(path)
-        shown = value if isinstance(value, str) else json.dumps(
-            [v if isinstance(v, str) else v.model_dump() for v in value] if isinstance(value, list)
-            else value.model_dump(), ensure_ascii=False)  # fmt: skip
-        rows.append(
-            {
-                "Field": path,
-                "Status": meta.status,
-                "Confidence": meta.confidence,
-                "Value": shown[:300],
-            }
+    st.progress(confirmed / len(brain.fields),
+                text=f"{confirmed} of {len(brain.fields)} fields confirmed by the owner")  # fmt: skip
+    with st.container(border=True):
+        st.markdown(
+            "**What agents do differently with an inferred fact**\n"
+            "- They treat it as a working assumption and never state it as fact in customer-facing copy.\n"
+            "- A recommendation resting on a low-confidence one must say so, and it shows as "
+            "“unconfirmed” in the strategy.\n"
+            "- Empty fields stay unknown; agents do not fill them in.\n"
+            "- The owner confirms or corrects a field in one tap, and the change is saved as a new version."
         )
-    st.dataframe(rows, hide_index=True, width="stretch")
+
+    def show(value) -> str:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            return "\n".join(
+                "- "
+                + (
+                    v
+                    if isinstance(v, str)
+                    else " · ".join(str(x) for x in v.model_dump().values() if x)
+                )
+                for v in value
+            )
+        return "  \n".join(
+            f"{display(key)}: {', '.join(val) if isinstance(val, list) else val}"
+            for key, val in value.model_dump().items()
+        )
+
+    groups = {"Business": ("business", "products"), "ICP": ("icp",), "Voice": ("voice",),
+              "Proof": ("proof",), "Competitors": ("competitors",)}  # fmt: skip
+    for title, prefixes in groups.items():
+        st.subheader(title)
+        for path, meta in brain.fields.items():
+            if path.split(".")[0] not in prefixes:
+                continue
+            with st.container(border=True):
+                name, badge = st.columns([3, 2])
+                name.markdown(f"**{display(path.split('.')[-1])}**")
+                if meta.status == "confirmed":
+                    badge.badge("Confirmed", color="green")
+                else:
+                    badge.badge(f"Inferred · {meta.confidence} confidence", color="orange")
+                st.markdown(show(brain.get(path)) or "_Not found on the website_")
+                if meta.status != "confirmed":
+                    sources = ", ".join(
+                        f"[{url.split('//')[-1]}]({url})" for url in meta.source_urls
+                    )
+                    st.caption(f"Source: {sources or 'none recorded'}. {meta.note}")
+
+# --- How it works ---
+
+with how_tab:
+    st.subheader("Five agents, one approval gate, one feedback loop")
+    st.graphviz_chart(
+        """
+        digraph {
+          rankdir=TB; bgcolor="transparent";
+          node [shape=box, style="rounded,filled", fillcolor="#eef3fb", color="#9cb4d8", fontname="Helvetica", fontsize=11];
+          edge [color="#7d8796", fontname="Helvetica", fontsize=9, fontcolor="#5b6577"];
+          site [label="Website + questionnaire", fillcolor="#f4f5f7"];
+          brain [label="Brand brain\\nevery field inferred or confirmed", shape=cylinder, fillcolor="#f4f5f7"];
+          research [label="Researcher\\nsearch, read, reviews"];
+          strategy [label="Strategist\\n5 frameworks + devil's advocate"];
+          writer [label="Writer\\n7 content types"];
+          editor [label="Editor\\nscores + line edits, max 3 rounds"];
+          guard [label="Guardrails", shape=diamond, fillcolor="#fdf3d8", color="#d4b45a"];
+          human [label="Owner approves,\\nedits or rejects", fillcolor="#e3f4ea", color="#7cc19a", penwidth=2];
+          live [label="Scheduled, then\\npublished by the owner"];
+          analyst [label="Analyst\\nsignificance tests in code"];
+          site -> brain -> research;
+          research -> strategy [label="cited claims only"];
+          strategy -> writer -> editor -> guard;
+          editor -> writer [label="edits"];
+          guard -> writer [label="blocked"];
+          guard -> human -> live -> analyst;
+          human -> brain [label="recurring edits become voice rules", constraint=false];
+          analyst -> strategy [label="3 proposed changes a week", constraint=false, color="#2a78d6", penwidth=2];
+        }
+        """
+    )
+    st.markdown(
+        "**The feedback loop** is the blue arrow. Results come back, the analyst proposes three "
+        "changes, the strategist rules on each with a reason, and accepted changes alter next "
+        "week's content plan."
+    )
+    st.subheader("What it refuses to do")
+    st.markdown(
+        "| It will not | How that is enforced |\n|---|---|\n"
+        "| Publish anything | Every draft waits for a named person's approval. |\n"
+        "| Use an invented statistic or testimonial | Anything not in the brand's own proof blocks the draft. |\n"
+        "| Make an uncited market claim | Claims whose source the agent never read are deleted. |\n"
+        "| Call a winner on a tiny sample | A significance test with a minimum sample; below it, “too early to call”. |\n"
+        "| Turn down a confident winner on a hunch | A significant A/B winner is accepted unless a specific risk is stated. |\n"
+        "| Overspend | A weekly cap checked before every model request. |"
+    )
+    st.markdown(f"More in the [architecture notes]({REPO}/blob/main/docs/architecture.md).")
+
+# --- Evals ---
+
+with evals_tab:
+    rows, ran_on = scorecard()
+    labels = {"pass": ("Pass", "green"), "fail": ("Fail", "red"),
+              "pending": ("Waiting on a human", "orange"), "skipped": ("Needs the live model", "gray")}  # fmt: skip
+    passed = sum(row["status"] == "pass" for row in rows)
+    st.subheader("Eval scorecard")
+    st.caption(f"The offline suite, run when this demo started ({ran_on}). {passed} of {len(rows)} evals "
+               "can pass without a model or a human; the rest say what they are waiting for.")  # fmt: skip
+    for row in rows:
+        text, colour = labels[row["status"]]
+        with st.container(border=True):
+            name, state = st.columns([3, 2])
+            name.markdown(f"**{display(row['name'])}** · {display(row['agent'], capital=False)}")
+            state.badge(text, color=colour)
+            if row["metrics"]:
+                st.dataframe(
+                    [{"Metric": display(key), "Value": str(value), "Threshold": row["thresholds"].get(key, "")}
+                     for key, value in row["metrics"].items()],
+                    hide_index=True, width="stretch",
+                )  # fmt: skip
+            for note in row["notes"]:
+                st.caption(note)

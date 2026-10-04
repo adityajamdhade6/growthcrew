@@ -4,7 +4,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, create_model
 
-from growthcrew.agents.learning_models import Ruling, Rulings, WeeklyLearnings
+from growthcrew.agents.learning_models import ProposedChange, Ruling, Rulings, WeeklyLearnings
 from growthcrew.agents.research_models import ResearchReport
 from growthcrew.agents.strategy_models import (
     Change,
@@ -167,14 +167,94 @@ def check(core: StrategyCore, known: set[str]) -> list[str]:
 
 REVIEW_SYSTEM = """You are the marketing strategist on a small-business marketing team. \
 The analyst has proposed changes for next week based on last week's results. Rule on each \
-one: accept it or reject it, with a reason the business owner can read later in the learning \
-log.
+one, with a reason the business owner can read later in the learning log.
 
-Accept a change when the evidence supports it and it fits the strategy's positioning and \
-budget. Reject it when the evidence is thin, when it contradicts the positioning or a \
-confirmed brain fact, or when one week of data does not justify the size of the shift. A \
-change marked blocked has already been ruled out by a statistical check and must be \
-rejected. Give a ruling for every change ID."""
+How to rule:
+- A change backed by a significant A/B test whose winner is the angle being shifted to is \
+accepted by default. The test is the evidence; do not reject it because the result is \
+surprising or because the variants are already being tested.
+- If you see a specific risk in acting on it, state it in `risk`: for example, the result \
+rests on one week of data, or the winning variant makes a claim the brand cannot yet prove. \
+A stated risk turns the change into a partial shift that is confirmed against next week's \
+data. It does not turn it into a rejection. Leave `risk` empty when there is none.
+- A change marked blocked has been ruled out by a statistical check and must be rejected.
+- Any other change (keep a test running, gather more data): accept it if it is sensible, \
+reject it with a reason if it is not.
+
+Give a ruling for every change ID."""
+
+# A partial shift moves this fraction of what was proposed, and never less than MIN_SHARE.
+PARTIAL_FRACTION = 0.5
+MIN_SHARE = 10
+
+
+def winning_readout(change: ProposedChange, learnings: WeeklyLearnings):
+    """The significant readout, if any, that shows the change's angle winning."""
+    if change.prefer_angle == "none":
+        return None
+    readouts = {readout.id: readout for readout in learnings.analysis.readouts}
+    backing = [
+        readouts[ref]
+        for ref in change.evidence
+        if ref in readouts
+        and readouts[ref].status == "significant"
+        and readouts[ref].winner == change.prefer_angle
+    ]
+    # Prefer a controlled test over a comparison across different pieces.
+    return next((r for r in backing if r.kind == "ab_test"), backing[0] if backing else None)
+
+
+def decide_rulings(
+    learnings: WeeklyLearnings, proposed: list[Ruling]
+) -> tuple[list[Ruling], list[ProposedChange]]:
+    """Apply the decision rule to the strategist's rulings.
+
+    A confident winner is accepted unless a specific risk is stated, in which case a partial
+    shift is accepted and flagged for confirmation next week. Returns the final rulings and
+    the changes as they will be applied (a partial shift has a smaller share).
+    """
+    by_id = {ruling.change_id: ruling for ruling in proposed}
+    rulings, changes = [], []
+    for change in learnings.changes:
+        raw = by_id.get(change.id)
+        readout = winning_readout(change, learnings)
+        if change.blocked_reason:
+            final = Ruling(
+                change_id=change.id, decision="rejected",
+                reason=f"Overruled by the statistical check: {change.blocked_reason}",
+            )  # fmt: skip
+        elif readout is None:
+            final = raw or Ruling(
+                change_id=change.id, decision="rejected", reason="The strategist gave no ruling"
+            )
+        else:
+            won = (
+                f"{readout.winner} won {readout.title or readout.name} "
+                f"(+{readout.lift_pct}% over the runner-up, p={readout.p_value})"
+            )
+            risk = raw.risk.strip() if raw else ""
+            if readout.kind == "observational" and not risk:
+                risk = "the comparison is across different pieces, not a controlled test"
+            said = f" The strategist's view: {raw.reason}" if raw and raw.reason else ""
+            if risk:
+                share = max(MIN_SHARE, round(change.share_pct * PARTIAL_FRACTION))
+                change = change.model_copy(update={"share_pct": share})
+                final = Ruling(
+                    change_id=change.id, decision="accepted_partial", risk=risk,
+                    confirm_next_week=True,
+                    reason=f"Accepted in part: {won}. Risk: {risk}. Shifting {share}% now and "
+                    f"confirming against next week's data before going further.{said}",
+                )  # fmt: skip
+            elif raw is None or raw.decision == "rejected":
+                final = Ruling(
+                    change_id=change.id, decision="accepted",
+                    reason=f"Accepted by default: {won}, and no specific risk was stated.{said}",
+                )  # fmt: skip
+            else:
+                final = raw.model_copy(update={"decision": "accepted", "confirm_next_week": False})
+        rulings.append(final)
+        changes.append(change)
+    return rulings, changes
 
 
 # Sections a reviewer can comment on, and the schema each is rewritten in.
@@ -253,8 +333,9 @@ class StrategistAgent:
 
     def review_changes(
         self, learnings: WeeklyLearnings, strategy: StrategyDoc, workspace: str | None = None
-    ) -> list[Ruling]:
-        """Accept or reject each proposed change, with a reason. One ruling per change."""
+    ) -> tuple[list[Ruling], list[ProposedChange]]:
+        """Rule on each proposed change. The decision rule in `decide_rulings` has the last
+        word, so a confident winner cannot be turned down without a stated risk."""
         context = (
             f"Positioning: {strategy.positioning.positioning_statement}\n"
             f"Core message: {strategy.messaging_house.core_message.text}\n"
@@ -271,19 +352,7 @@ class StrategistAgent:
             output_model=Rulings,
             workspace=workspace,
         )
-        by_id = {ruling.change_id: ruling for ruling in result.rulings}
-        rulings = []
-        for change in learnings.changes:
-            ruling = by_id.get(change.id) or Ruling(
-                change_id=change.id, decision="rejected", reason="The strategist gave no ruling"
-            )
-            if change.blocked_reason and ruling.decision == "accepted":
-                ruling = Ruling(
-                    change_id=change.id, decision="rejected",
-                    reason=f"Overruled by the statistical check: {change.blocked_reason}",
-                )  # fmt: skip
-            rulings.append(ruling)
-        return rulings
+        return decide_rulings(learnings, result.rulings)
 
     def revise_section(
         self, doc: StrategyDoc, section: str, comment: str, workspace: str | None = None
