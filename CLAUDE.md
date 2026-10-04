@@ -82,4 +82,5 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - Web app: `cd web && npm run dev` (set `GROWTHCREW_API_URL` if the API is not on 127.0.0.1:8000); `npm run build` type-checks it
 - Add a web user: `uv run growthcrew user add you@example.com --workspaces acme` (or `*` for admin)
 - Pilot: `uv run growthcrew pilot init <workspace> --start YYYY-MM-DD --business "Name"`, then weekly `pilot track <workspace>`, and `pilot report <workspace> --day 30|60`
+- Read-only Streamlit demo (sample data, for Streamlit Cloud): `uv run streamlit run streamlit_app.py`
 - Demo workspace with sample data: `uv run python -m evals.demo_seed`
