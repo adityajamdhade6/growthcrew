@@ -85,7 +85,7 @@ piece as it is drafted. `analytics/analysis.py` builds the readouts.
 | Module | Does |
 |---|---|
 | `store.py` | Remembers every published piece that has results: text, pillar, angle, persona, hypothesis, final rate, a score against the brand's average, and an embedding. `best_similar` returns the best-performing pieces among those most like a request. |
-| `embed.py` | The `Embedder` interface and a local default that hashes words and character n-grams. It matches wording and topic vocabulary; it is not a semantic model. |
+| `embed.py` | The `Embedder` interface and a local **lexical** default that hashes words and character n-grams. It matches wording and topic vocabulary, not meaning. A model-backed embedder with pgvector is planned for Phase 9 (see the [roadmap](roadmap.md)). |
 | `features.py` | The yes/no features the miner compares (question hook, number in the hook, and so on). |
 | `miner.py` | The weekly job. Compares pieces with and without each feature, piece against piece, over a rolling six-week window. A pattern must hold on two runs to become an active rule; one miss takes it out of use; three misses or a reversal retire it. A feature must show its effect within groups of the strongest one, so a feature that only rides along does not become a rule. |
 | `playbook.py` | Active rules with their history, what the writer is shown, the editor's check, and performance per prompt and strategy version. |

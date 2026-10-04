@@ -45,7 +45,8 @@ flowchart LR
 
 It also remembers. Every measured piece goes into a content memory; a weekly job looks for
 patterns that keep holding and retires the ones that stop; and the writer is shown the brand's
-own past winners before each draft.
+own past winners before each draft. Retrieval uses a lexical embedder (it matches shared wording and
+topic vocabulary, not meaning); a real embedding model is planned for Phase 9.
 
 **The loop that matters** is the bottom one: results come back, the analyst proposes three
 changes, the strategist accepts or rejects each with a reason, and accepted changes alter next
@@ -146,18 +147,18 @@ demo with a spending cap; it has not been deployed.
   defamatory claims, not every rewording.
 - **The judge is uncalibrated** until 20 human scores exist, and uses the same model as the
   agents by default.
+- **Lexical memory search.** Past pieces are matched on shared wording, not meaning.
+- **One look per test.** The experiment engine cannot stop a test early; see the roadmap.
 - **Text only.** No images, video or design for ads and social.
 - **One process, SQLite.** Background work runs inside the API process; fine for a pilot, not
   for scale.
 
 ## Roadmap
 
-1. Run every agent against the live model; fix what breaks; record real cost per piece.
-2. A 60-day pilot with one real business, baseline first.
-3. Human reference outputs and judge calibration, so content evals mean something.
-4. One real publishing integration behind the existing explicit-publish step.
-5. Analytics APIs in place of CSV uploads.
-6. A job queue and Postgres.
+See [docs/roadmap.md](docs/roadmap.md). Next: run every agent against the live model, B2B mode
+and a real pilot, always-on research agents, and a production backbone (Postgres, a job queue,
+a real embedding model). Sequential stopping for experiments is planned, since low-traffic B2B
+tests take too long to fill a fixed sample.
 
 ## Repo map
 
@@ -170,4 +171,4 @@ demo with a spending cap; it has not been deployed.
 | `src/growthcrew/guardrails.py`, `workflow.py`, `budget.py` | What is blocked, who approves, what it may spend |
 | `evals/` | Golden set, judge, eval suites, scorecard runner |
 | `web/` | Next.js app: onboarding, mission control, strategy, calendar, results, settings |
-| `docs/` | [Case study](docs/case_study.md), [launch copy](docs/launch.md), [self-review](docs/review.md) |
+| `docs/` | [Architecture](docs/architecture.md), [experiments](docs/experiments.md), [roadmap](docs/roadmap.md), [case study](docs/case_study.md), [launch copy](docs/launch.md), [self-review](docs/review.md) |

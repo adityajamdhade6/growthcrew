@@ -23,14 +23,14 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - `src/growthcrew/frameworks/`: one module per marketing framework. Each is a `Framework` (purpose, inputs, pydantic output schema, quality criteria, instructions) rendered through `templates/framework.j2`. Add a framework by adding a module and listing it in `FRAMEWORKS`.
 - `src/growthcrew/content/`: content types (`types.py`), one template per type with best practices and platform limits (`templates.py`), and deterministic draft checks (`checks.py`).
 - `src/growthcrew/experiments/`: the experiment engine (Bayesian A/B/n, decision rule, pre-registration, power, bandit, guardrails, simulations). Standalone: it must not import anything else from GrowthCrew, and a test enforces that.
-- `src/growthcrew/memory/`: content memory with embeddings (`store.py`, `embed.py`), the weekly pattern miner and rule decay (`miner.py`), and the playbook the agents read (`playbook.py`).
+- `src/growthcrew/memory/`: content memory with embeddings (`store.py`, `embed.py`; the default embedder is lexical, and must be described as lexical wherever it is mentioned), the weekly pattern miner and rule decay (`miner.py`), and the playbook the agents read (`playbook.py`).
 - `src/growthcrew/analytics/`: CSV ingest and piece matching (`ingest.py`), registrations and final verdicts (`registry.py`), and the weekly numbers (`analysis.py`). No model calls in this package.
 - `src/growthcrew/reports/`: Markdown and PDF rendering of agent outputs.
 - `src/growthcrew/db/`: SQLModel models and migrations.
 - `evals/`: the regression suite. `golden/` (3 fictional brands x 10 requests), `calibration/` (20 pieces plus human scores), `suites.py` (one function per eval), `judge.py` (fixed rubrics), `run.py` (scorecard).
 - `web/`: the Next.js + Tailwind app. Client components fetch through `lib/api.ts` (`/api` is proxied to FastAPI). Screens live in `app/(app)/`; shared pieces in `components/`.
 - `src/growthcrew/api/`: `main.py` (workflow routes), `ui.py` (routes the web app needs), `auth.py` (login, tokens, workspace access), `deps.py`.
-- `docs/`: architecture (agents, data flow, storage), case study, launch copy, self-review, and the README's demo GIF.
+- `docs/`: architecture (agents, data flow, storage), roadmap (what is planned and why, including sequential stopping), case study, launch copy, self-review, and the README's demo GIF.
 - `src/growthcrew/naming.py`: the one place that turns ids and enum values into words people read.
 - `tests/`, `workspaces/` (one folder per client brand, git-ignored).
 
@@ -79,7 +79,7 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 From the v2 upgrade pack (13 phases). They apply to every phase.
 
 - Start each phase by reading this file and `docs/architecture.md`; update both when the phase ends.
-- One git branch per phase. Merge only when tests and evals pass.
+- One git branch per phase. Do not merge pull requests: open the PR, wait for CI, then give the owner a 5-line summary of what changed and which files to read. The owner merges. If a branch has to stack on an unmerged one, say which order to merge in.
 - After each phase, ask what a senior engineer would criticise, and fix the top 3.
 - The public demo runs on sample data only. Real client data never goes into the demo.
 
