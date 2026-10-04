@@ -28,7 +28,8 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - `evals/`: the regression suite. `golden/` (3 fictional brands x 10 requests), `calibration/` (20 pieces plus human scores), `suites.py` (one function per eval), `judge.py` (fixed rubrics), `run.py` (scorecard).
 - `web/`: the Next.js + Tailwind app. Client components fetch through `lib/api.ts` (`/api` is proxied to FastAPI). Screens live in `app/(app)/`; shared pieces in `components/`.
 - `src/growthcrew/api/`: `main.py` (workflow routes), `ui.py` (routes the web app needs), `auth.py` (login, tokens, workspace access), `deps.py`.
-- `docs/`: case study, launch copy, self-review, and the README's demo GIF.
+- `docs/`: architecture (agents, data flow, storage), case study, launch copy, self-review, and the README's demo GIF.
+- `src/growthcrew/naming.py`: the one place that turns ids and enum values into words people read.
 - `tests/`, `workspaces/` (one folder per client brand, git-ignored).
 
 ## Rules
@@ -44,6 +45,9 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - Scores and totals (ICE, experiment ranking, budget split, quote frequency) are computed or checked in code, not taken from the model.
 - Content may use a statistic, customer name or testimonial only if it is in the brain's proof. `content/checks.py` enforces this, the banned-phrase list and platform length limits; a finding caps the critic's score for that criterion, so the model cannot pass a draft the checks fail.
 - A content piece goes through at most 3 critic rounds and passes only when all six scores are 8 or more. Pieces that do not pass are still saved, marked as such, for the human reviewer.
+- A change backed by a significant A/B winner is accepted by default; a stated risk makes it a partial shift to confirm next week, never a rejection (`strategist.decide_rulings`). Wins seen only across different pieces are always partial.
+- Every experiment result is shown with its uncertainty: probability the leader is best, a 95% interval on the lift, and the sample size. Never show a bare "wins", and never print 100% for a probability.
+- User-facing text uses `naming.display`, `piece_name` and `plural`; no raw ids or enum values on screen.
 - The analyst interprets statistics; it never computes them. A winner exists only where `analytics.stats.compare` returns `significant`; below the minimum sample the answer is `not_enough_data`. An angle shift without a significant readout behind it is blocked in code and the strategist cannot accept it. Do not lower `MIN_TRIALS` or `ALPHA` to get a result.
 - Analytics rows that cannot be matched to a piece are reported as unmatched, never assigned by guess.
 - A draft with a guardrail violation is `blocked`: it cannot be approved, only rejected or edited until clean. Do not add a way around this.

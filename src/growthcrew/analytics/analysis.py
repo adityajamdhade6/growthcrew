@@ -12,9 +12,10 @@ from pydantic import BaseModel
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
-from growthcrew.analytics.stats import Arm, Status, compare
+from growthcrew.analytics.stats import Arm, Status, Uncertainty, compare, uncertainty
 from growthcrew.content.types import ANGLES
 from growthcrew.db.models import Draft, PerformanceRow
+from growthcrew.naming import display, piece_name
 from growthcrew.workflow import CHANNELS
 
 ANOMALY_MIN_DAYS = 8
@@ -49,8 +50,12 @@ class Readout(BaseModel):
     # ab_test: variants of one piece. observational: pooled over different pieces.
     kind: str
     name: str
+    # The name as shown to people, e.g. "Day 3 ad" for `07-day03-ad`.
+    title: str = ""
     metric: str
     arms: list[dict]
+    # Always present, whatever the verdict.
+    uncertainty: Uncertainty | None = None
     status: Status
     winner: str | None = None
     p_value: float | None = None
@@ -88,7 +93,9 @@ def _readout(number: int, kind: str, name: str, metric: str, arms: list[Arm], no
         id=f"r{number}",
         kind=kind,
         name=name,
+        title=piece_name(name) if kind == "ab_test" else display(name),
         metric=metric,
+        uncertainty=uncertainty(arms),
         arms=[{**arm.model_dump(), "rate_pct": round(arm.rate * 100, 2)} for arm in arms],
         status=result.status,
         winner=result.winner,
