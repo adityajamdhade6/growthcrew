@@ -46,8 +46,20 @@ const NAMES: Record<string, string> = {
   seo: "SEO",
 };
 
+// Proper names that must keep their spelling inside longer labels ("linkedin impressions").
+const PROPER: [RegExp, string][] = [
+  [/\blinkedin\b/gi, "LinkedIn"],
+  [/\bgsc\b/gi, "Search Console"],
+  [/\bga4\b/gi, "GA4"],
+  [/\bseo\b/gi, "SEO"],
+];
+
 export const label = (value: string) =>
-  NAMES[value] ?? value.replace(/[_.]/g, " ").replace(/^\w/, (letter) => letter.toUpperCase());
+  NAMES[value] ??
+  PROPER.reduce(
+    (text, [pattern, name]) => text.replace(pattern, name),
+    value.replace(/[_.]/g, " ").replace(/^\w/, (letter) => letter.toUpperCase()),
+  );
 
 export const plural = (count: number, word: string) =>
   `${count.toLocaleString()} ${word}${count === 1 ? "" : "s"}`;

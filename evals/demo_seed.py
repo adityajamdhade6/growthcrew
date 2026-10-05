@@ -348,6 +348,57 @@ def _history(text: str, scores: dict, edits=(), violations=()) -> str:
     return json.dumps([first, {**version, "round": 2}] if first else [version])
 
 
+def seed_panel(engine) -> None:
+    """A sample synthetic panel and its pre-test of the ad test, simulated for the demo."""
+    import random
+
+    from growthcrew.db.models import ExperimentRegistration, PanelRun, Persona
+    from growthcrew.panel.pretest import aggregate, recommend
+
+    with Session(engine) as session:
+        test = session.exec(
+            select(ExperimentRegistration).where(
+                ExperimentRegistration.workspace == WORKSPACE,
+                ExperimentRegistration.experiment == "07-day03-ad",
+            )
+        ).first()
+    if test is None:
+        return
+    labels = json.loads(test.data)["variants"]
+    people = [
+        ("Maya", "Hot sleeper who wakes at 3am kicking off the duvet", "hot sleepers"),
+        ("Tom", "New homeowner furnishing a guest room on a budget", "first home"),
+        ("Priya", "Buys gifts for weddings from the registry", "gift buyers"),
+        ("Dan", "Sceptical of 'luxury' bedding claims; reads every review", "sceptics"),
+        ("Lena", "Wants natural fibres and cares where they are made", "natural fibres"),
+        ("Sam", "Replaces sheets only when they wear through", "practical"),
+    ]
+    rng = random.Random(4)
+    responses = []
+    with Session(engine) as session:
+        for name, summary, segment in people:
+            profile = {"summary": f"Sample persona: {summary}", "segment": segment,
+                       "demographics": [], "pains": [], "objections": [], "media_habits": [],
+                       "phrases": []}  # fmt: skip
+            session.add(Persona(workspace=WORKSPACE, generation=1, name=name,
+                                profile=json.dumps(profile), support='["brain:icp.pains"]'))  # fmt: skip
+            lean = {"outcome": 1.5, "social_proof": 0.5}
+            responses.append([
+                {"persona": name, "label": label, "position": i,
+                 "stop": max(1, min(7, round(3.5 + lean.get(label, 0) + rng.gauss(0, 1.2)))),
+                 "click": rng.random() < 0.25 + 0.15 * lean.get(label, 0),
+                 "objection": "Sample: not sure linen is worth the price", "confusing": ""}
+                for i, label in enumerate(labels)
+            ])  # fmt: skip
+        prediction = aggregate(responses, labels)
+        session.add(PanelRun(workspace=WORKSPACE, cycle_id=test.cycle_id, experiment=test.experiment,
+                             generation=1, responses=json.dumps(responses),
+                             prediction=prediction.model_dump_json(),
+                             recommendation=recommend(prediction, "untested").model_dump_json(),
+                             trust="untested"))  # fmt: skip
+        session.commit()
+
+
 def seed_signals(engine) -> None:
     """Sample findings for the Signals inbox. Invented for the demo, like the brand itself."""
     sample = "Sample data: "
@@ -572,6 +623,7 @@ def main() -> None:
             create_user(engine, DEMO_EMAIL, DEMO_PASSWORD, "*")
         session.commit()
     seed_signals(engine)
+    seed_panel(engine)
     print(f"Seeded {WORKSPACE}. Demo login: {DEMO_EMAIL} (password is DEMO_PASSWORD in this file)")
 
 

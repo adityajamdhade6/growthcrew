@@ -121,6 +121,17 @@ Images are part of the draft's review: the review panel shows the three sizes si
 with the critic's scores, fixes and the measured checks, and says when the text has been
 edited since the images were made. Downloading an image for use needs an approved ad.
 
+## The synthetic audience panel
+
+`panel/` pre-tests every new experiment before launch, at the end of the weekly cycle's critic
+stage (a failure never halts the cycle). Personas are written from the brain and research,
+each citing evidence; each persona reacts to every variant in a shuffled order; the reactions
+are aggregated in code into a predicted ranking with resampled probabilities. Once the real
+test has a final verdict, the prediction is scored against it (rank correlation, top-pick hit
+rate), and that record sets how far the panel is trusted. It never picks a winner; it can only
+suggest dropping a clearly weak variant from a test of three or more, and stops suggesting
+anything when its record is poor. See [panel.md](panel.md) for the rules and its known biases.
+
 ## Always-on research: the monitors and the Signals inbox
 
 `monitor/` watches what changes around the brand each week and files each finding in the
@@ -161,7 +172,7 @@ stateDiagram-v2
     strategy_check --> content_plan: strategy rewritten only on new evidence<br/>(new sources or signals sent from the inbox);<br/>last week's changes ruled on
     content_plan --> drafting: accepted changes applied to the plan
     drafting --> critic: writer and editor loop per piece
-    critic --> awaiting_approval
+    critic --> awaiting_approval: synthetic panel pre-tests each new experiment
     awaiting_approval --> scheduled: a named person approves, edits or rejects each draft
     scheduled --> published: the owner publishes and confirms
     published --> measured: results uploaded
@@ -236,6 +247,7 @@ columns added at startup; there is no migration tool yet.
 | `PageSnapshot`, `SeenItem` | Weekly text of each watched competitor page, and ads and posts already reported |
 | `KeywordRank` | Search Console rows: each query's position, clicks and impressions by date |
 | `Creative` | Each rendered size of an ad image per critic round: slots, scores, fixes, measured checks, whether it passed, whether any image on it was AI-generated |
+| `Persona`, `PanelRun` | Synthetic personas by generation, with their evidence; each pre-test with every reaction, the predicted ranking, the advice and the trust level at the time |
 | `Signal` | Monitor findings with their sources and dates, importance, status (new, sent, dismissed) and who decided |
 
 Fetched pages and search results are cached on disk under `.cache/` for up to a week.

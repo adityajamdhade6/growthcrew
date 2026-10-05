@@ -40,6 +40,7 @@ from growthcrew.db.models import (
     Cycle,
     Draft,
     OnboardingJob,
+    PanelRun,
     PerformanceRow,
     RoleModel,
     Signal,
@@ -50,6 +51,8 @@ from growthcrew.memory import playbook
 from growthcrew.monitor import signals as monitor_signals
 from growthcrew.monitor.run import run_monitors
 from growthcrew.monitor.seo import ranking_history
+from growthcrew.panel import calibration as panel_calibration
+from growthcrew.panel import personas as panel_personas
 from growthcrew.reports.strategy import save_strategy
 from growthcrew.workflow import require_approved
 
@@ -694,3 +697,43 @@ async def upload_brand_image(
         kit["product_images"].append({"file": stored, "alt": alt.strip()})
     guard(lambda: update_field(workspace, "brand_kit", kit, root=WORKSPACES_DIR, engine=engine))
     return {"file": stored, "brand_kit": kit}
+
+
+# --- synthetic panel ---
+
+
+@router.get("/workspaces/{workspace}/panel")
+def panel_summary(workspace: str, engine: Engine = Depends(engine_dep)) -> dict:
+    """The panel's personas and its record against real test results."""
+    people = panel_personas.panel(engine, workspace)
+    return {
+        "accuracy": panel_calibration.accuracy(engine, workspace),
+        "generation": people[0].generation if people else 0,
+        "personas": [
+            {"name": p.name, **json.loads(p.profile), "support": json.loads(p.support)}
+            for p in people
+        ],
+    }
+
+
+@router.get("/drafts/{draft_id}/panel")
+def draft_panel(draft_id: int, engine: Engine = Depends(engine_dep)) -> dict:
+    """The panel's pre-test of the experiment this draft belongs to, if there was one."""
+    with Session(engine) as session:
+        draft = session.get(Draft, draft_id)
+        base = _base_id(draft)
+        run = session.exec(
+            select(PanelRun)
+            .where(PanelRun.cycle_id == draft.cycle_id, PanelRun.experiment == base)
+            .order_by(PanelRun.created_at.desc())
+        ).first()
+    if run is None:
+        return {"experiment": base, "ran": False}
+    return {
+        "experiment": base,
+        "ran": True,
+        "trust": run.trust,
+        "prediction": json.loads(run.prediction),
+        "recommendation": json.loads(run.recommendation),
+        "accuracy_message": panel_calibration.accuracy(engine, draft.workspace)["message"],
+    }

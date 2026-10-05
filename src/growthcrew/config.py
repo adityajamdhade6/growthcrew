@@ -31,6 +31,7 @@ class AgentRole(StrEnum):
     MONITOR = "monitor"
     CREATIVE = "creative"
     VISION_CRITIC = "vision_critic"
+    PANEL = "panel"
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,9 @@ AGENT_MODELS: dict[AgentRole, RoleConfig] = {
     # Fills the slots of ad templates, and the critic that looks at the rendered images.
     AgentRole.CREATIVE: RoleConfig(model=OPUS, effort="medium"),
     AgentRole.VISION_CRITIC: RoleConfig(model=OPUS, effort="high"),
+    # The synthetic panel: one call per persona per test, so the cheapest role to move to
+    # SONNET or HAIKU once its calibration shows quality holds.
+    AgentRole.PANEL: RoleConfig(model=OPUS, effort="low"),
 }
 
 
@@ -112,6 +116,10 @@ EXPERIMENT_DEFAULTS: dict[str, tuple[str, float, tuple[str, ...]]] = {
 }
 # The smallest relative lift worth detecting, used to plan the sample size.
 EXPERIMENT_MDE = 0.3
+
+# Personas in the synthetic panel, and how many are written per model call.
+PANEL_SIZE = int(os.getenv("GROWTHCREW_PANEL_SIZE", "24"))
+PANEL_BATCH = 8
 
 # Hard cap on tool calls in one research run.
 RESEARCH_MAX_TOOL_CALLS = 25

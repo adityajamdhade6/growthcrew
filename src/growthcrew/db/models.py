@@ -477,3 +477,36 @@ class Creative(SQLModel, table=True):
     ai_generated: bool = False
     # Model, prompt and date of a generated image, as JSON.
     image_meta: str = "{}"
+
+
+class Persona(SQLModel, table=True):
+    """A synthetic respondent built from the ideal customer and voice-of-customer research."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    created_at: datetime = Field(default_factory=_now)
+    # Personas are made in generations; a new one replaces the last when research changes.
+    generation: int = Field(index=True)
+    name: str
+    # summary, segment, demographics, pains, objections, media_habits, phrases, as JSON.
+    profile: str
+    # The evidence IDs (brain:..., voc:N, claim:N) the persona rests on, as JSON.
+    support: str = "[]"
+
+
+class PanelRun(SQLModel, table=True):
+    """One pre-test of an experiment's variants by the synthetic panel, before launch."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=_now)
+    workspace: str = Field(index=True)
+    cycle_id: int = Field(index=True)
+    # The experiment's base piece id, as registered, e.g. "07-day03-ad".
+    experiment: str = Field(index=True)
+    generation: int = 0
+    # Every persona's reactions, the predicted ranking with its uncertainty, and the advice.
+    responses: str = "[]"
+    prediction: str = "{}"
+    recommendation: str = "{}"
+    # untested, low, useful: how far the panel's past predictions matched real results.
+    trust: str = "untested"

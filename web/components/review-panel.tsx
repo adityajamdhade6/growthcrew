@@ -5,6 +5,7 @@ import { api, ApiError, useApi } from "@/lib/api";
 import { label } from "@/lib/session";
 import { Badge, Button, ErrorState, Field, inputClass, Loading, Notice, Sheet, statusTone } from "@/components/ui";
 import { AdImages, LandingPreview } from "@/components/creatives";
+import { PanelPrediction } from "@/components/panel";
 
 type Review = {
   id: number;
@@ -151,6 +152,8 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
               </div>
             </div>
           )}
+
+          {data.variants.length > 0 && <PanelPrediction draftId={data.id} />}
 
           {data.violations.length > 0 && (
             <Notice tone="bad">

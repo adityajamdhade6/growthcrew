@@ -41,6 +41,7 @@ from growthcrew.memory import miner
 from growthcrew.monitor import signals as monitor_signals
 from growthcrew.monitor.run import MonitorRun, run_monitors
 from growthcrew.naming import display, piece_name, plural
+from growthcrew.panel.cycle import pretest_cycle
 from growthcrew.reports.content import save_batch
 from growthcrew.reports.strategy import save_strategy
 from growthcrew.versions import strategy_version
@@ -70,6 +71,7 @@ class Orchestrator:
         content: ContentAgent | None = None,
         max_items: int = 5,
         monitors: Callable[[str], MonitorRun] | None = None,
+        panel: Callable[[int], list[str]] | None = None,
     ) -> None:
         self.engine = engine or (llm.engine if llm else get_engine())
         self.root = root
@@ -84,6 +86,13 @@ class Orchestrator:
                 return run_monitors(llm, self.engine, workspace, self.root)
 
         self.monitors = monitors
+        # The synthetic panel's pre-test of each new experiment. Off without a model.
+        if panel is None and llm is not None:
+
+            def panel(cycle_id: int) -> list[str]:
+                return pretest_cycle(llm, self.engine, cycle_id, self.root)
+
+        self.panel = panel
 
     def start_cycle(self, workspace: str) -> Cycle:
         with Session(self.engine, expire_on_commit=False) as session:
@@ -391,6 +400,15 @@ class Orchestrator:
         blocked = [piece_name(draft.piece_id) for draft in drafts if draft.status == "blocked"]
         if blocked:
             detail += f"; blocked by guardrails: {', '.join(blocked)}"
+        if self.panel is not None:
+            # The pre-test is advice for the reviewer; a failure never holds the cycle back.
+            try:
+                notes = self.panel(cycle.id)
+                if notes:
+                    detail += "; " + "; ".join(notes)
+            except Exception as exc:  # noqa: BLE001 — budget included: the reviewer is next
+                logger.exception("Panel pre-test failed for cycle %s", cycle.id)
+                detail += f"; panel pre-test failed: {type(exc).__name__}"
         return detail
 
 
