@@ -7,6 +7,7 @@ after that are reached only through the human actions in `workflow.py`.
 import json
 import logging
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -37,6 +38,8 @@ from growthcrew.db.models import (
 from growthcrew.db.session import get_engine
 from growthcrew.llm import LLM
 from growthcrew.memory import miner
+from growthcrew.monitor import signals as monitor_signals
+from growthcrew.monitor.run import MonitorRun, run_monitors
 from growthcrew.naming import display, piece_name, plural
 from growthcrew.reports.content import save_batch
 from growthcrew.reports.strategy import save_strategy
@@ -46,6 +49,10 @@ from growthcrew.workflow import STAGES
 logger = logging.getLogger(__name__)
 
 AUTOMATED = STAGES[: STAGES.index("awaiting_approval")]
+
+
+def _aware(moment: datetime) -> datetime:
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
 
 def _source_urls(report: ResearchReport | None) -> set[str]:
@@ -62,6 +69,7 @@ class Orchestrator:
         strategist: StrategistAgent | None = None,
         content: ContentAgent | None = None,
         max_items: int = 5,
+        monitors: Callable[[str], MonitorRun] | None = None,
     ) -> None:
         self.engine = engine or (llm.engine if llm else get_engine())
         self.root = root
@@ -69,6 +77,13 @@ class Orchestrator:
         self.strategist = strategist or StrategistAgent(llm, root=root)
         self.content = content or ContentAgent(llm, root=root)
         self.max_items = max_items
+        # The weekly competitor, SEO and social monitors. Off when there is no model to call.
+        if monitors is None and llm is not None:
+
+            def monitors(workspace: str) -> MonitorRun:
+                return run_monitors(llm, self.engine, workspace, self.root)
+
+        self.monitors = monitors
 
     def start_cycle(self, workspace: str) -> Cycle:
         with Session(self.engine, expire_on_commit=False) as session:
@@ -192,6 +207,17 @@ class Orchestrator:
             f"{len(report.claims())} cited claims from {report.brief.sources_read} sources; "
             f"{len(new)} sources not seen in the previous research"
         )
+        if self.monitors is not None:
+            # A monitor failing never halts the cycle: the inbox is extra evidence, not a step
+            # the strategy depends on.
+            try:
+                found = self.monitors(cycle.workspace)
+                detail += f"; {plural(found.stored, 'new signal')} in the inbox"
+                if found.failures:
+                    detail += f" ({plural(len(found.failures), 'monitor')} failed)"
+            except Exception as exc:  # noqa: BLE001 — budget included: the next step checks it
+                logger.exception("Monitors failed for %s", cycle.workspace)
+                detail += f"; monitors failed: {type(exc).__name__}"
         return detail, None, json.dumps({"new_sources": new, "first": previous is None})
 
     def _strategy_check(self, cycle: Cycle):
@@ -205,10 +231,31 @@ class Orchestrator:
         # The weekly memory job: remember measured pieces and re-test every playbook rule.
         miner.mine(self.engine, workspace, as_of=datetime.now(UTC))
         notes = []
-        if strategy is None or new:
+        # Signals a person sent from the inbox since the strategy was written are new evidence.
+        signals_sent = [
+            signal
+            for signal in monitor_signals.for_strategist(self.engine, workspace)
+            if strategy is not None
+            and signal.decided_at is not None
+            and _aware(signal.decided_at) > _aware(strategy.created_at)
+        ]
+        if strategy is None or new or signals_sent:
             brand = load_brain(workspace, root=self.root)
             research = load_latest_research(workspace, self.root)
-            reason = f"{len(new)} new sources" if strategy else "no strategy existed yet"
+            reason = (
+                "no strategy existed yet"
+                if strategy is None
+                else ", ".join(
+                    part
+                    for part in (
+                        f"{len(new)} new sources" if new else "",
+                        plural(len(signals_sent), "signal") + " sent from the inbox"
+                        if signals_sent
+                        else "",
+                    )
+                    if part
+                )
+            )
             strategy = self.strategist.run(StrategyInput(brand=brand, research=research), workspace)
             save_strategy(strategy, self.root)
             notes.append(f"Strategy written ({reason}); {len(strategy.issues)} open issues")

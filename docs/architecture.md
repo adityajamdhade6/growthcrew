@@ -103,13 +103,44 @@ one, and only an accepted proposal is written into the brand voice.
 Every model call logs a `prompt_version` (a short hash of its system prompt), and every draft
 records the writer prompt version and strategy version that produced it.
 
+## Always-on research: the monitors and the Signals inbox
+
+`monitor/` watches what changes around the brand each week and files each finding in the
+Signals inbox. The monitors run at the start of every weekly cycle (a failure never halts the
+cycle), and on demand from `growthcrew monitor <workspace>` or the Signals page.
+
+| Module | Does |
+|---|---|
+| `competitors.py` | Snapshots each watched page (`PageSnapshot`) and diffs it with last week's. Price changes and new blog posts are found in code; the model only judges whether other changes are a copy tweak or new positioning, and suggests a response. Ads come from Meta Ad Library (or similar) exports in `workspaces/<brand>/ads/`, classified by hook, angle and offer; labels for ads not in the export are dropped. |
+| `seo.py` | Reads Search Console and keyword-research exports from `workspaces/<brand>/seo/`. Gaps (a competitor top 10, us absent or below 20th), topic clusters (lexical: keywords sharing words) and ranking moves (5 places or more) are computed in code. The model writes one brief per cluster; internal links that are not the brand's own pages are removed. |
+| `social.py` | Reads exported posts (Reddit and review sites do not allow scraping) and forum pages that robots.txt allows. Pains, questions and phrases each carry a quote, kept only if word for word in its post. Spikes are counted in code against the previous four weeks. |
+| `settings.py` | What to watch: `workspaces/<brand>/monitor.json`, or each brain competitor's home, pricing and blog pages. |
+| `signals.py` | Stores findings once (same fingerprint, or lexically near-identical to a recent signal or a research claim, is a duplicate), ranks them, and writes the weekly digest to `workspaces/<brand>/signals/<date>.md`. |
+
+**Ranking** is computed: base importance set by the monitor (a price change 0.9, a copy tweak
+0.2) x a weight per category learned from people's choices (sent versus dismissed, a Beta(1,1)
+mean, so an even record leaves it at 1) x a half-life of 14 days. Dismissing a kind of signal
+ranks that kind lower.
+
+**Send to strategist** makes a signal citable as `signal:N` evidence, and the next cycle
+rewrites the strategy because there is new evidence. Nothing a monitor finds changes the
+strategy unless a person sends it.
+
+**Prompt injection.** Fetched pages, exports and reviews are untrusted. `tools/untrusted.py`
+wraps every piece of it in `<untrusted_content>` delimiters that the text cannot close (any
+delimiter inside is neutralised), and every system prompt that reads it carries the rule that
+it is data. The monitors make single structured calls with no tools, so fetched text can never
+pick a tool; the research agent's tool results are wrapped the same way. Output is checked in
+code afterwards: uncited findings are dropped, quotes must be verbatim, links must be known.
+Text that reads like instructions to a model is flagged on the signal for the reader.
+
 ## The weekly cycle
 
 ```mermaid
 stateDiagram-v2
     [*] --> research
-    research --> strategy_check: weekly memory job re-tests the playbook
-    strategy_check --> content_plan: strategy rewritten only on new evidence;<br/>last week's changes ruled on
+    research --> strategy_check: monitors file signals;<br/>weekly memory job re-tests the playbook
+    strategy_check --> content_plan: strategy rewritten only on new evidence<br/>(new sources or signals sent from the inbox);<br/>last week's changes ruled on
     content_plan --> drafting: accepted changes applied to the plan
     drafting --> critic: writer and editor loop per piece
     critic --> awaiting_approval
@@ -129,7 +160,8 @@ restart or the budget resumes from the stage it stopped at.
    from LinkedIn, Search Console, GA4, the email tool and the ad platform come in.
 2. **Evidence.** The researcher's claims, each with its source URL, and the brain's fields,
    each tagged confirmed or inferred, are numbered into one evidence list
-   (`brain:icp.pains`, `learning:2`, `claim:14`, `voc:1`). The strategy cites these IDs.
+   (`brain:icp.pains`, `learning:2`, `claim:14`, `voc:1`, `rule:3`, `signal:7`). The strategy
+   cites these IDs.
 3. **Content.** A content plan becomes drafts. Each draft carries the pillar it serves, the
    persona, the call to action and the hypothesis it tests, plus a tracking key.
 4. **Gate.** Guardrails, then the editor's scores, then a person. Blocked drafts cannot be
@@ -158,6 +190,9 @@ Two places, both local by default.
 | `content/<timestamp>/` | A batch: every draft, score and revision |
 | `learnings/<timestamp>.json` | Each week's learnings |
 | `reviews/<source>.csv` | Review exports the owner supplies for sites that forbid scraping |
+| `monitor.json` | Optional: the competitor pages, forums and keywords to watch |
+| `ads/`, `seo/`, `social/` | Ad library exports, Search Console and keyword exports, exported posts |
+| `signals/<date>.md` | Each week's signals digest |
 | `pilot/` | Baseline, weekly log, tracker, reports, testimonial |
 
 **Database** (SQLite via SQLModel; `DATABASE_URL` to change it). Tables are created and new
@@ -177,6 +212,9 @@ columns added at startup; there is no migration tool yet.
 | `PlaybookRule`, `RuleEvent` | Each mined pattern, its status, and one history entry per weekly run |
 | `User`, `WorkspaceBudget`, `RoleModel`, `Alert` | Sign-in and workspace access, spending limits, model choices, alerts |
 | `OnboardingJob`, `StrategyComment` | Progress of background work started from the web app |
+| `PageSnapshot`, `SeenItem` | Weekly text of each watched competitor page, and ads and posts already reported |
+| `KeywordRank` | Search Console rows: each query's position, clicks and impressions by date |
+| `Signal` | Monitor findings with their sources and dates, importance, status (new, sent, dismissed) and who decided |
 
 Fetched pages and search results are cached on disk under `.cache/` for up to a week.
 
@@ -186,11 +224,11 @@ Fetched pages and search results are cached on disk under `.cache/` for up to a 
   involved.
 - **Web app** (`web/`): Next.js, talking to the API through a same-origin proxy.
 - **Streamlit demo** (`streamlit_app.py`): read-only, sample data.
-- **CLI** (`cli.py`): onboarding, research, strategy, content, cycles, users, the pilot.
+- **CLI** (`cli.py`): onboarding, research, monitoring, strategy, content, cycles, users, the pilot.
 - **Evals** (`evals/`): the regression suite and scorecard, run in CI.
 
 ## What is outside the system
 
-The model (Anthropic API), a search API, and the sites the researcher reads. Fetches go through
+The model (Anthropic API), a search API, and the sites the researcher and the monitors read. Fetches go through
 one client that refuses private addresses, honours robots.txt, rate-limits per host and caches.
 Nothing is sent anywhere else, and nothing is posted to any platform.

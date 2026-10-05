@@ -17,9 +17,16 @@ from sqlalchemy import Engine
 from sqlmodel import Session, select
 
 from growthcrew.api.deps import engine_dep
-from growthcrew.db.models import CalendarItem, Cycle, Draft, User
+from growthcrew.db.models import CalendarItem, Cycle, Draft, Signal, User
 
 TOKEN_TTL = 7 * 24 * 3600
+# Path parameters that name a row; the route belongs to that row's workspace.
+ID_PARAMS = (
+    ("draft_id", Draft),
+    ("cycle_id", Cycle),
+    ("item_id", CalendarItem),
+    ("signal_id", Signal),
+)
 PUBLIC_PATHS = {"/health", "/auth/login", "/docs", "/openapi.json"}
 # Routes with no workspace in them that only an admin may use.
 ADMIN_PREFIXES = ("/costs", "/settings")
@@ -108,7 +115,7 @@ def authorize(request: Request, engine: Engine = Depends(engine_dep)) -> None:
             raise HTTPException(401, "Sign in to continue")
         workspace = request.path_params.get("workspace") or request.query_params.get("workspace")
         # Routes addressed by id belong to the workspace of the row they name.
-        for param, model in (("draft_id", Draft), ("cycle_id", Cycle), ("item_id", CalendarItem)):
+        for param, model in ID_PARAMS:
             if param in request.path_params:
                 row = session.get(model, int(request.path_params[param]))
                 if row is None:

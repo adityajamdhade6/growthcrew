@@ -79,6 +79,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--weeks", type=int, default=2)
     p.add_argument("--max-items", type=int, default=8)
 
+    p = commands.add_parser("monitor", help="Run the competitor, SEO and social monitors")
+    p.add_argument("workspace")
+
     p = commands.add_parser("cycle", help="Run this week's cycle up to the approval stage")
     p.add_argument("workspace")
     p.add_argument("--max-items", type=int, default=5)
@@ -180,6 +183,19 @@ def main(argv: list[str] | None = None) -> int:
         cycle = orchestrator.run(orchestrator.start_cycle(args.workspace).id)
         print(render_timeline(timeline(orchestrator.engine, cycle.id)))
         print("\nApprove, edit or reject drafts through the API: POST /drafts/<id>/decision")
+    elif args.command == "monitor":
+        from growthcrew.monitor.run import run_monitors
+
+        load_brain(args.workspace)
+        if (llm := _llm()) is None:
+            return 1
+        result = run_monitors(llm, llm.engine, args.workspace, Path("workspaces"))
+        found = ", ".join(f"{name} {count}" for name, count in result.found.items()) or "nothing"
+        print(f"Found: {found}. New signals: {result.stored}; duplicates skipped: "
+              f"{result.duplicates}.")  # fmt: skip
+        for failure in result.failures:
+            print(f"Failed: {failure}")
+        print(f"Digest: {result.digest_path}")
     elif args.command == "user":
         import getpass
 

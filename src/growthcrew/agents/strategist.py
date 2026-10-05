@@ -1,5 +1,6 @@
 """Strategist: brain + research -> StrategyDoc, with one devil's-advocate revision."""
 
+import json
 from pathlib import Path
 
 from pydantic import BaseModel, create_model
@@ -26,6 +27,7 @@ from growthcrew.frameworks.positioning import Positioning
 from growthcrew.frameworks.test_and_learn import TestPlan
 from growthcrew.llm import LLM, Conversation
 from growthcrew.memory import playbook
+from growthcrew.monitor import signals as monitor_signals
 
 WORKSPACES_DIR = Path("workspaces")
 EXPERIMENTS = 5
@@ -85,7 +87,10 @@ for each section again. First, write the revision log."""
 
 
 def build_evidence(
-    brand: Brain, research: ResearchReport, rules: list | None = None
+    brand: Brain,
+    research: ResearchReport,
+    rules: list | None = None,
+    signals: list | None = None,
 ) -> list[EvidenceItem]:
     items: list[EvidenceItem] = []
     for path in FIELD_PATHS:
@@ -128,6 +133,17 @@ def build_evidence(
         items.append(
             EvidenceItem(
                 id=f"rule:{rule.id}", text=playbook.describe(rule), quality="playbook rule, active"
+            )
+        )
+    # Monitor findings a person sent to the strategist from the Signals inbox.
+    for signal in signals or []:
+        sources = json.loads(signal.sources)
+        items.append(
+            EvidenceItem(
+                id=f"signal:{signal.id}",
+                text=f"{signal.title}: {signal.summary}",
+                source_url=", ".join(source["url"] for source in sources),
+                quality=f"monitor finding, {sources[0]['date'] if sources else 'undated'}",
             )
         )
     return items
@@ -429,7 +445,8 @@ class StrategistAgent:
     def run(self, inp: StrategyInput, workspace: str | None = None) -> StrategyDoc:
         workspace = workspace or inp.brand.workspace
         rules = playbook.rules(self.llm.engine, workspace, "active")
-        evidence = build_evidence(inp.brand, inp.research, rules)
+        sent = monitor_signals.for_strategist(self.llm.engine, workspace)
+        evidence = build_evidence(inp.brand, inp.research, rules, sent)
         known = {item.id for item in evidence}
         rendered = render_evidence(evidence)
 

@@ -383,3 +383,70 @@ class RuleEvent(SQLModel, table=True):
     pieces_with: int
     pieces_without: int
     note: str = ""
+
+
+class PageSnapshot(SQLModel, table=True):
+    """The readable text of a monitored page on one date, for week-to-week diffs."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    competitor: str = ""
+    url: str = Field(index=True)
+    # home, pricing, blog, or forum
+    kind: str
+    fetched_at: datetime = Field(default_factory=_now)
+    text: str
+    # Links found on the page, as a JSON list; used to spot new blog posts.
+    links: str = "[]"
+    digest: str = ""
+
+
+class SeenItem(SQLModel, table=True):
+    """Something a monitor has already reported (an ad, a post), so it is not reported twice."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    kind: str
+    key: str = Field(index=True)
+    first_seen: datetime = Field(default_factory=_now)
+
+
+class KeywordRank(SQLModel, table=True):
+    """One row of a Search Console export: a query's position on a date."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    keyword: str = Field(index=True)
+    page: str = ""
+    date: datetime
+    position: float
+    clicks: float = 0
+    impressions: float = 0
+
+
+class Signal(SQLModel, table=True):
+    """One finding from the always-on monitors, waiting in the Signals inbox."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=_now, index=True)
+    workspace: str = Field(index=True)
+    # competitor, seo, social
+    monitor: str
+    # price_change, positioning, copy_tweak, new_post, new_ads, keyword_gap, ranking_move,
+    # pain, question, language, spike
+    category: str = Field(index=True)
+    title: str
+    summary: str
+    suggested_response: str = ""
+    # [{"url": ..., "date": ...}], every source the finding rests on
+    sources: str = "[]"
+    # How much the finding matters before anyone has reacted to it, 0 to 1, set in code.
+    base_importance: float = 0.5
+    # Text in the source that looked like instructions to a model, if any.
+    warning: str = ""
+    # new, sent (to the strategist), dismissed
+    status: str = Field(default="new", index=True)
+    decided_by: str = ""
+    decided_at: datetime | None = None
+    fingerprint: str = Field(default="", index=True)
+    embedding: str = "[]"

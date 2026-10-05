@@ -35,10 +35,14 @@ from growthcrew.db.models import (
     OnboardingJob,
     PerformanceRow,
     RoleModel,
+    Signal,
     StrategyComment,
 )
 from growthcrew.llm import LLM
 from growthcrew.memory import playbook
+from growthcrew.monitor import signals as monitor_signals
+from growthcrew.monitor.run import run_monitors
+from growthcrew.monitor.seo import ranking_history
 from growthcrew.reports.strategy import save_strategy
 
 router = APIRouter()
@@ -488,3 +492,55 @@ def decide_proposal(
 ) -> dict:
     outcome = guard(lambda: learning.resolve_proposal(engine, workspace, proposal_id, body.accept))
     return {"id": proposal_id, "status": outcome}
+
+
+# --- signals inbox ---
+
+
+@router.get("/workspaces/{workspace}/signals")
+def list_signals(
+    workspace: str, status: str = "new", engine: Engine = Depends(engine_dep)
+) -> list[dict]:
+    """Monitor findings with this status, most important first."""
+    if status not in ("new", "sent", "dismissed"):
+        raise HTTPException(400, "status must be new, sent or dismissed")
+    return monitor_signals.inbox(engine, workspace, status)
+
+
+class SignalDecisionIn(BaseModel):
+    action: str
+
+
+@router.post("/signals/{signal_id}")
+def decide_signal(
+    signal_id: int, body: SignalDecisionIn, request: Request, engine: Engine = Depends(engine_dep)
+) -> dict:
+    """Send a signal to the strategist or dismiss it, as the signed-in person."""
+    user = auth.current_user(request)
+    person = user.email if user else "unknown"
+    with Session(engine) as session:
+        signal = session.get(Signal, signal_id)
+        if signal is None:
+            raise HTTPException(404, "Signal not found")
+        workspace = signal.workspace
+    return guard(lambda: monitor_signals.decide(engine, workspace, signal_id, body.action, person))
+
+
+@router.post("/workspaces/{workspace}/monitor", status_code=202)
+def start_monitoring(
+    workspace: str,
+    background: BackgroundTasks,
+    engine: Engine = Depends(engine_dep),
+    llm: LLM = Depends(llm_dep),
+) -> dict:
+    """Run the competitor, SEO and social monitors now. Findings arrive in the inbox."""
+    guard(lambda: load_brain(workspace))
+    guard(lambda: budget.check(engine, workspace))
+    background.add_task(run_monitors, llm, engine, workspace, WORKSPACES_DIR)
+    return {"workspace": workspace, "status": "started"}
+
+
+@router.get("/workspaces/{workspace}/rankings")
+def keyword_ranking(workspace: str, keyword: str, engine: Engine = Depends(engine_dep)) -> list:
+    """A keyword's position over time, from Search Console exports."""
+    return ranking_history(engine, workspace, keyword)

@@ -61,6 +61,7 @@ from growthcrew.frameworks.test_and_learn import Experiment
 from growthcrew.memory import playbook
 from growthcrew.memory.miner import mine
 from growthcrew.memory.simulate import run as simulate_memory
+from growthcrew.monitor import signals
 from growthcrew.reports.strategy import save_strategy
 
 WORKSPACE = "demo-loomhouse"
@@ -347,6 +348,43 @@ def _history(text: str, scores: dict, edits=(), violations=()) -> str:
     return json.dumps([first, {**version, "round": 2}] if first else [version])
 
 
+def seed_signals(engine) -> None:
+    """Sample findings for the Signals inbox. Invented for the demo, like the brand itself."""
+    sample = "Sample data: "
+    findings = [
+        signals.Finding(monitor="competitor", category="price_change",
+                        title="Brightside Linen changed prices on its pricing page",
+                        summary=f"{sample}Prices no longer shown: $179. New prices: $159.",
+                        suggested_response="Check whether our pricing message still holds "
+                        "against the new numbers.", base_importance=0.9,
+                        sources=[signals.Source(url="https://brightside.example/pricing",
+                                                date="2026-10-01")]),
+        signals.Finding(monitor="competitor", category="positioning",
+                        title="Cotton & Co's home page: new positioning",
+                        summary=f"{sample}The headline moved from 'everyday cotton' to "
+                        "'cooling sheets for hot sleepers', the audience Loomhouse targets.",
+                        suggested_response="Lead with lived-in softness and the 60-night "
+                        "trial, where Cotton & Co has no claim.", base_importance=0.8,
+                        sources=[signals.Source(url="https://cottonco.example/",
+                                                date="2026-10-02")]),
+        signals.Finding(monitor="seo", category="keyword_gap",
+                        title="Content gap: linen sheets for hot sleepers",
+                        summary=f"{sample}3 keywords with 6,100 monthly searches where a "
+                        "competitor ranks and we do not.",
+                        suggested_response="Outline: Why linen sleeps cooler; Thread count "
+                        "does not matter for linen; Washing and care", base_importance=0.7,
+                        sources=[signals.Source(url="workspace://demo-loomhouse/seo/keywords.csv",
+                                                date="2026-09-30")]),
+        signals.Finding(monitor="social", category="question",
+                        title="Does linen soften or stay scratchy?",
+                        summary=f'{sample}"Bought linen once and it felt like a sack. Does it '
+                        'actually get softer?"', base_importance=0.5,
+                        sources=[signals.Source(url="workspace://demo-loomhouse/social/reddit.csv#4",
+                                                date="2026-09-29")]),
+    ]  # fmt: skip
+    signals.file_findings(engine, WORKSPACE, findings)
+
+
 def main() -> None:
     engine = get_engine()
     if list_versions(WORKSPACE):
@@ -533,6 +571,7 @@ def main() -> None:
             session.commit()
             create_user(engine, DEMO_EMAIL, DEMO_PASSWORD, "*")
         session.commit()
+    seed_signals(engine)
     print(f"Seeded {WORKSPACE}. Demo login: {DEMO_EMAIL} (password is DEMO_PASSWORD in this file)")
 
 

@@ -28,6 +28,7 @@ class AgentRole(StrEnum):
     ONBOARDING = "onboarding"
     VERIFIER = "verifier"
     JUDGE = "judge"
+    MONITOR = "monitor"
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,8 @@ AGENT_MODELS: dict[AgentRole, RoleConfig] = {
     AgentRole.VERIFIER: RoleConfig(model=OPUS, effort="medium"),
     # The eval judge. Keep it fixed between runs, or scores are not comparable.
     AgentRole.JUDGE: RoleConfig(model=OPUS, effort="high"),
+    # The always-on competitor, SEO and social monitors.
+    AgentRole.MONITOR: RoleConfig(model=OPUS, effort="medium"),
 }
 
 

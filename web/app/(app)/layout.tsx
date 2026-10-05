@@ -14,6 +14,7 @@ const NAV = [
   { href: "/strategy", label: "Strategy", icon: "M4 19V5m0 14h16M8 15l3-4 3 2 5-7" },
   { href: "/calendar", label: "Calendar", icon: "M4 7h16v13H4zM4 11h16M8 4v4m8-4v4" },
   { href: "/results", label: "Results", icon: "M5 20V10m7 10V4m7 16v-7" },
+  { href: "/signals", label: "Signals", icon: "M4 12a8 8 0 0 1 16 0M7.5 12a4.5 4.5 0 0 1 9 0M12 12v8" },
   { href: "/playbook", label: "Playbook", icon: "M5 4h11l3 3v13H5zM9 9h6M9 13h6M9 17h3" },
   { href: "/settings", label: "Settings", icon: "M4 7h10m4 0h2M4 17h4m4 0h8M14 5v4M8 15v4" },
 ];

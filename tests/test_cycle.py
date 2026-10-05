@@ -164,6 +164,50 @@ def test_strategy_changes_only_when_research_finds_new_sources(setup, engine):
     assert stubs.strategies == 2
 
 
+def test_cycle_runs_the_monitors_and_a_sent_signal_rewrites_the_strategy(setup, engine):
+    from growthcrew.monitor import signals
+    from growthcrew.monitor.run import MonitorRun
+
+    orchestrator, stubs = setup
+    calls = []
+
+    def monitors(workspace):
+        calls.append(workspace)
+        found = signals.Finding(monitor="competitor", category="price_change",
+                                title="Rival cut prices", summary="From $49 to $39",
+                                sources=[signals.Source(url="https://rival.test/p",
+                                                        date="2026-10-01")])  # fmt: skip
+        stored, _ = signals.file_findings(engine, workspace, [found])
+        return MonitorRun(workspace=workspace, found={"competitor": 1}, stored=len(stored),
+                          duplicates=0, failures=[], digest_path="")  # fmt: skip
+
+    orchestrator.monitors = monitors
+    cycle = run_cycle(orchestrator)
+    assert calls == ["acme"] and stubs.strategies == 1
+    research = timeline(engine, cycle.id)["steps"][0]["detail"]
+    assert research.endswith("1 new signal in the inbox")
+
+    run_cycle(orchestrator)
+    assert stubs.strategies == 1  # nothing sent yet, nothing new
+    [item] = signals.inbox(engine, "acme")
+    signals.decide(engine, "acme", item["id"], "send", "owner@acme.test")
+    third = run_cycle(orchestrator)
+    assert stubs.strategies == 2
+    detail = timeline(engine, third.id)["steps"][1]["detail"]
+    assert "1 signal sent from the inbox" in detail
+
+
+def test_a_failing_monitor_does_not_halt_the_cycle(setup):
+    orchestrator, _ = setup
+
+    def broken(workspace):
+        raise RuntimeError("site down")
+
+    orchestrator.monitors = broken
+    cycle = run_cycle(orchestrator)
+    assert cycle.stage == "awaiting_approval"
+
+
 def test_running_again_does_not_pass_the_approval_stage(setup):
     orchestrator, _ = setup
     cycle = run_cycle(orchestrator)

@@ -37,6 +37,13 @@ const NAMES: Record<string, string> = {
   accepted_partial: "Accepted in part",
   social_proof: "Social proof",
   ai_cliche: "No clichés",
+  price_change: "Price change",
+  copy_tweak: "Copy tweak",
+  new_post: "New blog post",
+  new_ads: "New ads",
+  keyword_gap: "Content gap",
+  ranking_move: "Ranking move",
+  seo: "SEO",
 };
 
 export const label = (value: string) =>
