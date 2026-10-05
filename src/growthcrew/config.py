@@ -29,6 +29,8 @@ class AgentRole(StrEnum):
     VERIFIER = "verifier"
     JUDGE = "judge"
     MONITOR = "monitor"
+    CREATIVE = "creative"
+    VISION_CRITIC = "vision_critic"
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,9 @@ AGENT_MODELS: dict[AgentRole, RoleConfig] = {
     AgentRole.JUDGE: RoleConfig(model=OPUS, effort="high"),
     # The always-on competitor, SEO and social monitors.
     AgentRole.MONITOR: RoleConfig(model=OPUS, effort="medium"),
+    # Fills the slots of ad templates, and the critic that looks at the rendered images.
+    AgentRole.CREATIVE: RoleConfig(model=OPUS, effort="medium"),
+    AgentRole.VISION_CRITIC: RoleConfig(model=OPUS, effort="high"),
 }
 
 
@@ -110,6 +115,15 @@ EXPERIMENT_MDE = 0.3
 
 # Hard cap on tool calls in one research run.
 RESEARCH_MAX_TOOL_CALLS = 25
+
+# Optional AI imagery for ad backgrounds. Off unless GROWTHCREW_AI_IMAGES=1 and a key is set.
+# Every generated image is labelled as AI-generated in its metadata and in the review panel.
+AI_IMAGES = os.getenv("GROWTHCREW_AI_IMAGES", "") == "1"
+IMAGE_API_KEY = os.getenv("OPENAI_API_KEY", "")
+IMAGE_MODEL = os.getenv("GROWTHCREW_IMAGE_MODEL", "gpt-image-1")
+
+# A Chromium binary for rendering creatives, when Playwright's own is not installed.
+CHROMIUM_PATH = os.getenv("GROWTHCREW_CHROMIUM_PATH", "")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///growthcrew.db")
 SEARCH_API_KEY = os.getenv("SEARCH_API_KEY", "")

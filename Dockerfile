@@ -7,6 +7,8 @@ COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 COPY evals ./evals
 RUN uv sync --frozen --no-dev
+# Chromium for rendering ad images (creative/render.py).
+RUN uv run playwright install --with-deps chromium
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app" \

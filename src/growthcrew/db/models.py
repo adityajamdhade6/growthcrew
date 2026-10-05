@@ -450,3 +450,30 @@ class Signal(SQLModel, table=True):
     decided_at: datetime | None = None
     fingerprint: str = Field(default="", index=True)
     embedding: str = "[]"
+
+
+class Creative(SQLModel, table=True):
+    """One rendered size of an ad image in one round of the vision critic's loop."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=_now)
+    workspace: str = Field(index=True)
+    draft_id: int = Field(index=True)
+    # A hash of the draft text the image was made from; differs once the text is edited.
+    text_hash: str = ""
+    # square, portrait, story
+    size: str
+    round: int
+    # Under workspaces/<brand>/creative/<draft_id>/
+    path: str
+    # The slots the model filled, as JSON: headline, subcopy, cta, alt_text, text_scale.
+    slots: str
+    # The vision critic's scores and fixes, and the checks measured in code, as JSON.
+    scores: str = "{}"
+    fixes: str = "[]"
+    checks: str = "[]"
+    passed: bool = False
+    # True when any image on it was made by an image-generation model.
+    ai_generated: bool = False
+    # Model, prompt and date of a generated image, as JSON.
+    image_meta: str = "{}"

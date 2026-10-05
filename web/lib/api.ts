@@ -117,3 +117,16 @@ export function useApi<T>(path: string | null, poll?: number): Loaded<T> {
 
   return { data, error, loading, reload: () => load(true) };
 }
+
+/** Fetch a protected file (an image) and return an object URL for it, or throw ApiError. */
+export async function apiBlobUrl(path: string): Promise<string> {
+  const token = getToken();
+  let response: Response;
+  try {
+    response = await fetch(`/api${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  } catch {
+    throw new ApiError(0, "Cannot reach the server. Check your connection and try again.");
+  }
+  if (!response.ok) throw new ApiError(response.status, `Could not load the image (${response.status}).`);
+  return URL.createObjectURL(await response.blob());
+}

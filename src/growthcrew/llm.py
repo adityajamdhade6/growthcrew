@@ -5,6 +5,7 @@ pydantic-validated object, and writes one `LLMCall` row per attempt with tokens
 and cost. `LLM.conversation` does the same for multi-turn tool use.
 """
 
+import base64
 import logging
 import time
 from collections.abc import Callable, Sequence
@@ -92,14 +93,32 @@ class LLM:
         output_model: type[T],
         workspace: str | None = None,
         tag: str | None = None,
+        images: Sequence[bytes] = (),
     ) -> T:
-        """Run one structured-output request for `role` and return the validated result."""
+        """Run one structured-output request for `role` and return the validated result.
+
+        `images` are PNG bytes shown to the model before the text, for the vision critic.
+        """
+        content: str | list[dict[str, Any]] = user
+        if images:
+            content = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": base64.b64encode(image).decode(),
+                    },
+                }
+                for image in images
+            ]
+            content.append({"type": "text", "text": user})
         response = self.send(
             role,
             workspace,
             tag=tag,
             system=system,
-            messages=[{"role": "user", "content": user}],
+            messages=[{"role": "user", "content": content}],
             output_format=output_model,
         )
         return response.parsed_output

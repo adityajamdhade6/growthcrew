@@ -82,6 +82,14 @@ def main(argv: list[str] | None = None) -> int:
     p = commands.add_parser("monitor", help="Run the competitor, SEO and social monitors")
     p.add_argument("workspace")
 
+    p = commands.add_parser("creative", help="Render an ad draft as images, with the vision critic")
+    p.add_argument("workspace")
+    p.add_argument("--draft", type=int, required=True, help="The ad draft's id")
+
+    p = commands.add_parser("landing", help="Export approved landing hero variants as HTML")
+    p.add_argument("workspace")
+    p.add_argument("--draft", type=int, required=True, help="Any variant's draft id")
+
     p = commands.add_parser("cycle", help="Run this week's cycle up to the approval stage")
     p.add_argument("workspace")
     p.add_argument("--max-items", type=int, default=5)
@@ -196,6 +204,37 @@ def main(argv: list[str] | None = None) -> int:
         for failure in result.failures:
             print(f"Failed: {failure}")
         print(f"Digest: {result.digest_path}")
+    elif args.command == "creative":
+        from sqlmodel import Session
+
+        from growthcrew.creative.agent import CreativeAgent
+        from growthcrew.creative.images import generator
+        from growthcrew.creative.render import renderer
+        from growthcrew.db.models import Draft
+
+        brand = load_brain(args.workspace)
+        if (llm := _llm()) is None:
+            return 1
+        with Session(llm.engine) as session:
+            draft = session.get(Draft, args.draft)
+        if draft is None or draft.workspace != args.workspace:
+            print(f"No draft {args.draft} in {args.workspace}")
+            return 1
+        with renderer() as browser:
+            agent = CreativeAgent(llm, llm.engine, browser, Path("workspaces"), generator())
+            result = agent.run(draft, brand)
+        for item in result.rounds:
+            lowest = min((min(row.values()) for row in item.scores.values()), default=0)
+            print(f"Round {item.round}: {'passed' if item.passed else 'not passed'}, "
+                  f"lowest score {lowest}{'; blocked' if item.blocked else ''}")  # fmt: skip
+        print(f"Images: workspaces/{args.workspace}/creative/{draft.id}/")
+    elif args.command == "landing":
+        from growthcrew.creative.landing import export_variants
+        from growthcrew.db.session import get_engine
+
+        brand = load_brain(args.workspace)
+        for path in export_variants(get_engine(), args.draft, brand, Path("workspaces")):
+            print(path)
     elif args.command == "user":
         import getpass
 

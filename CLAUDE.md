@@ -24,6 +24,7 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - `src/growthcrew/content/`: content types (`types.py`), one template per type with best practices and platform limits (`templates.py`), and deterministic draft checks (`checks.py`).
 - `src/growthcrew/experiments/`: the experiment engine (Bayesian A/B/n, decision rule, pre-registration, power, bandit, guardrails, simulations). Standalone: it must not import anything else from GrowthCrew, and a test enforces that.
 - `src/growthcrew/memory/`: content memory with embeddings (`store.py`, `embed.py`; the default embedder is lexical, and must be described as lexical wherever it is mentioned), the weekly pattern miner and rule decay (`miner.py`), and the playbook the agents read (`playbook.py`).
+- `src/growthcrew/creative/`: visual creative (Phase 5): the brand kit (`kit.py`), HTML templates rendered by Chromium in three sizes (`templates/`, `render.py`), accessibility and platform checks (`access.py`), the slot filler and vision critic loop (`agent.py`), optional AI backgrounds (`images.py`), landing page variants (`landing.py`).
 - `src/growthcrew/monitor/`: the always-on research (Phase 4): competitor page snapshots and diffs plus ad exports (`competitors.py`), Search Console gaps, lexical topic clusters, briefs and ranking moves (`seo.py`), social listening from exports and allowed forums (`social.py`), what to watch (`settings.py`), and the Signals inbox with dedupe, learned ranking and the weekly digest (`signals.py`). `run.py` runs them all; the weekly cycle calls it in the research stage.
 - `src/growthcrew/analytics/`: CSV ingest and piece matching (`ingest.py`), registrations and final verdicts (`registry.py`), and the weekly numbers (`analysis.py`). No model calls in this package.
 - `src/growthcrew/reports/`: Markdown and PDF rendering of agent outputs.
@@ -65,6 +66,8 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - Pilot reports are before/after comparisons, not experiments. Keep the "Read this first" and caveats sections in every report, never describe a change as caused by GrowthCrew, and flag counts under 30 as too few to interpret.
 - A testimonial is the owner's own words with their wording confirmed and each use permitted. Never draft or reword one, and only read it through `pilot.testimonial_for(workspace, use)`.
 - Fetch web pages only through `tools.fetch.Fetcher` or `polite_client()`, which refuse private and local addresses, check robots.txt, rate-limit per host and cache. Review sites that forbid scraping are read from exports in `workspaces/<brand>/reviews/`, never scraped.
+- The model fills template slots; it never writes layout HTML or CSS. Words on an image go through `guardrails.check` like any copy. Measured checks (contrast, text size, clipping, safe area, text share, alt text) cap the vision critic's scores; do not let the critic pass an image the checks fail, and keep the 3-round limit.
+- Rendering refuses all network requests; brand images are uploaded files checked by signature, never URLs. A generated image is always labelled AI-generated, in its metadata and on screen. Exporting or downloading creative for use needs an approved draft (`workflow.require_approved`).
 - Fetched pages, exports and reviews are untrusted data. Pass them to a model only through `tools.untrusted.wrap`, put `DATA_RULE` in the system prompt, never give a model tools in a call that reads them unless the results are wrapped too, and check the output in code (citations, verbatim quotes, known links). Never let fetched text change a prompt or choose a tool.
 - Every monitor finding cites a URL and a date; a finding without one is dropped. A signal reaches the strategy only when a person sends it from the inbox, and the person recorded is the signed-in user.
 - Research claims whose URL the agent did not read, and customer quotes that are not verbatim in their source, are dropped in code. Keep it that way; do not relax it to make output look fuller.
@@ -97,6 +100,7 @@ From the v2 upgrade pack (13 phases). They apply to every phase.
 - Strategy: `uv run growthcrew strategy <workspace>` (writes `.json`, `.md`, `.pdf` under `workspaces/<brand>/strategy/`)
 - Content batch: `uv run growthcrew content <workspace> [--weeks 2] [--max-items 8]`
 - Monitors and signals digest: `uv run growthcrew monitor <workspace>` (or `POST /workspaces/<workspace>/monitor`)
+- Ad images for a draft: `uv run growthcrew creative <workspace> --draft <id>`; approved landing variants as HTML: `uv run growthcrew landing <workspace> --draft <id>`
 - Weekly cycle: `uv run growthcrew cycle <workspace>` (or `POST /workspaces/<workspace>/cycles`)
 - Evals: `make eval` (offline, free) and `make eval-live [LIMIT=5]` (calls the model). Scorecard in `evals/results/`.
 - Cost dashboard: `/costs/dashboard?workspace=<workspace>`

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api, ApiError, useApi } from "@/lib/api";
 import { label } from "@/lib/session";
 import { Badge, Button, ErrorState, Field, inputClass, Loading, Notice, Sheet, statusTone } from "@/components/ui";
+import { AdImages, LandingPreview } from "@/components/creatives";
 
 type Review = {
   id: number;
@@ -177,6 +178,9 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
               )}
             </div>
           )}
+
+          {mode === "view" && data.content_type === "ad" && <AdImages draftId={data.id} disabled={data.status === "rejected"} />}
+          {mode === "view" && data.content_type === "landing_hero" && <LandingPreview draftId={data.id} />}
 
           {mode === "reject" && (
             <Field label="What is wrong with it?" hint="Optional, but it helps the team.">

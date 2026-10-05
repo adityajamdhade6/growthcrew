@@ -103,6 +103,24 @@ one, and only an accepted proposal is written into the brand voice.
 Every model call logs a `prompt_version` (a short hash of its system prompt), and every draft
 records the writer prompt version and strategy version that produced it.
 
+## Visual creative and the vision critic
+
+`creative/` turns an ad draft into images and a landing hero into a page. Templates keep the
+layout on-brand; the model only fills slots.
+
+| Module | Does |
+|---|---|
+| `kit.py` | The brand kit from the brain (`brand_kit`: logo, colours, fonts, image style rules, do and don't examples, product photos with descriptions), with readable fallbacks. Images are files under `workspaces/<brand>/brand/`, uploaded through the API (type checked by signature, 5 MB limit), never URLs. |
+| `templates/ad.html.j2`, `render.py` | One HTML template rendered by headless Chromium at 1:1 (1080x1080), 4:5 (1080x1350) and 9:16 (1080x1920, text kept out of the areas the platform's buttons cover). Every network request is refused while rendering. The page is measured as it renders: font sizes, clipped text, text outside the safe area, the share of the image covered by text, the word count. |
+| `access.py` | WCAG contrast (4.5:1 body, 3:1 headline), minimum text sizes, text share (35%), word count (30), alt text that describes the photo. |
+| `agent.py` | The loop: the model fills slots (headline, sub-copy, button, alt text, a text scale per size) from the draft's copy; the slots go through the guardrails; each size is rendered and checked; the vision critic sees all three (at phone size, 540px wide) and scores readability, hierarchy, brand consistency, thumb-stopping power and platform rules, with fixes aimed at one slot. A failed check caps the score it concerns at 5. Passing needs every score 8 or more on every size and good alt text; at most 3 rounds, and the last round is kept either way. |
+| `images.py` | Optional AI backgrounds (OpenAI Images), off unless `GROWTHCREW_AI_IMAGES=1`. The prompt is built in code and asks for no text, logos or faces. Every generated image is stored with its model, prompt and date and shown as AI-generated. |
+| `landing.py` | A landing hero draft (its current, possibly edited text) as a standalone HTML page, one per angle. Previewed in a sandboxed frame; written to files only for approved variants. |
+
+Images are part of the draft's review: the review panel shows the three sizes side by side
+with the critic's scores, fixes and the measured checks, and says when the text has been
+edited since the images were made. Downloading an image for use needs an approved ad.
+
 ## Always-on research: the monitors and the Signals inbox
 
 `monitor/` watches what changes around the brand each week and files each finding in the
@@ -193,6 +211,9 @@ Two places, both local by default.
 | `monitor.json` | Optional: the competitor pages, forums and keywords to watch |
 | `ads/`, `seo/`, `social/` | Ad library exports, Search Console and keyword exports, exported posts |
 | `signals/<date>.md` | Each week's signals digest |
+| `brand/` | The brand kit's logo and product photos |
+| `creative/<draft id>/r<round>-<size>.png` | Rendered ad images; `ai-*.png` and `.json` for generated backgrounds |
+| `creative/landing/<piece>/<angle>.html` | Exported landing page variants |
 | `pilot/` | Baseline, weekly log, tracker, reports, testimonial |
 
 **Database** (SQLite via SQLModel; `DATABASE_URL` to change it). Tables are created and new
@@ -214,6 +235,7 @@ columns added at startup; there is no migration tool yet.
 | `OnboardingJob`, `StrategyComment` | Progress of background work started from the web app |
 | `PageSnapshot`, `SeenItem` | Weekly text of each watched competitor page, and ads and posts already reported |
 | `KeywordRank` | Search Console rows: each query's position, clicks and impressions by date |
+| `Creative` | Each rendered size of an ad image per critic round: slots, scores, fixes, measured checks, whether it passed, whether any image on it was AI-generated |
 | `Signal` | Monitor findings with their sources and dates, importance, status (new, sent, dismissed) and who decided |
 
 Fetched pages and search results are cached on disk under `.cache/` for up to a week.
@@ -229,6 +251,7 @@ Fetched pages and search results are cached on disk under `.cache/` for up to a 
 
 ## What is outside the system
 
-The model (Anthropic API), a search API, and the sites the researcher and the monitors read. Fetches go through
+The model (Anthropic API), a search API, the sites the researcher and the monitors read, and,
+only when switched on, an image-generation API. Fetches go through
 one client that refuses private addresses, honours robots.txt, rate-limits per host and caches.
 Nothing is sent anywhere else, and nothing is posted to any platform.

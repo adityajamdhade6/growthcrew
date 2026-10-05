@@ -581,7 +581,8 @@ with brain_tab:
         )
 
     groups = {"Business": ("business", "products"), "ICP": ("icp",), "Voice": ("voice",),
-              "Proof": ("proof",), "Competitors": ("competitors",)}  # fmt: skip
+              "Proof": ("proof",), "Competitors": ("competitors",),
+              "Brand kit": ("brand_kit",)}  # fmt: skip
     for title, prefixes in groups.items():
         st.subheader(title)
         for path, meta in brain.fields.items():

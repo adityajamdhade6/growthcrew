@@ -20,6 +20,8 @@ dependencies = [
     "markdown>=3.11",
     "streamlit>=1.65.0",
     "numpy>=2.4.6",
+    "playwright>=1.63.0",
+    "pillow>=12.3.0",
 ]
 
 [project.scripts]
