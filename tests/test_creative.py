@@ -389,8 +389,8 @@ def test_brand_images_are_uploaded_by_signature_and_saved_as_a_new_version(clien
     from growthcrew.brain.store import list_versions, load_brain
 
     before = list_versions("acme", tmp_path)
-    added = client.post("/workspaces/acme/brand/images?name=../../etc/My Loaf!.png&alt=A loaf on a board",
-                        content=PNG)  # fmt: skip
+    url = "/workspaces/acme/brand/images?name=../../etc/My Loaf!.png&alt=A loaf on a board"
+    added = client.post(url, content=PNG)
     assert added.status_code == 200 and added.json()["file"] == "MyLoaf.png"
     assert (tmp_path / "acme" / "brand" / "MyLoaf.png").read_bytes() == PNG
     brain = load_brain("acme", root=tmp_path)
