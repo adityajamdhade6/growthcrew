@@ -14,7 +14,7 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - `src/growthcrew/llm.py`: the only module that calls the Anthropic API. Agents go through `LLM.call`.
 - `src/growthcrew/workflow.py`: the human actions (decide, publish, record metrics). The only code that moves a cycle past `awaiting_approval`.
 - `src/growthcrew/budget.py`: weekly spend cap per workspace, checked before every LLM request and between cycle steps.
-- `src/growthcrew/integrations/`: exports (calendar CSV, `.eml` drafts) and the publisher registry (Brevo newsletters only).
+- `src/growthcrew/integrations/`: exports (calendar CSV, `.eml` drafts) and the publisher registry (Brevo newsletters only), and `mixlab.py`, the MixLab client (budget split with intervals in, final verdicts out as calibration; `SyntheticMixLab` is labelled synthetic).
 - `src/growthcrew/guardrails.py`: pattern rules that block invented proof, competitor defamation, health and finance claims, and brand-banned language. Runs in the content loop and again on human edits; every block is logged to `GuardrailBlock`.
 - `src/growthcrew/pilot.py`: the 60-day pilot kit (baseline, plan, weekly log, tracker, day-30/60 reports, testimonial). Templates and arithmetic only.
 - `src/growthcrew/config.py`: model, effort and pricing per agent role. Change models here only.

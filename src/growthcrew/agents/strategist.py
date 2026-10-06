@@ -323,9 +323,22 @@ class StrategyInput(BaseModel):
 class StrategistAgent:
     role = AgentRole.STRATEGIST
 
-    def __init__(self, llm: LLM, root: Path = WORKSPACES_DIR) -> None:
+    def __init__(
+        self, llm: LLM, root: Path = WORKSPACES_DIR, mixlab=None, budget_total: float = 0.0
+    ) -> None:
         self.llm = llm
         self.root = root
+        # Optional MixLab client (integrations.mixlab). Its split is advice: a planned share
+        # outside its interval becomes an issue to explain or fix, never an automatic change.
+        self.mixlab, self.budget_total = mixlab, budget_total
+
+    def _mix_issues(self, core: StrategyCore, workspace: str) -> list[str]:
+        if self.mixlab is None or self.budget_total <= 0:
+            return []
+        from growthcrew.integrations import mixlab
+
+        advice = self.mixlab.optimize_budget(workspace, self.budget_total)
+        return mixlab.review_split(mixlab.plan_split(core), advice)
 
     def _write(self, chat: Conversation, lead: str = "", revised: bool = False) -> StrategyCore:
         """Apply each framework in turn, one structured output per framework."""
@@ -454,7 +467,7 @@ class StrategistAgent:
             self.role, system=f"{SYSTEM}\n\n{BRAIN_NOTE}", workspace=workspace
         )
         draft = self._write(chat, lead=f"Evidence:\n{rendered}\n\n")
-        draft_issues = check(draft, known)
+        draft_issues = check(draft, known) + self._mix_issues(draft, workspace)
 
         critique = self.critique(draft, rendered, workspace)
         revision = chat.extract(
@@ -465,7 +478,7 @@ class StrategistAgent:
             RevisionLog,
         )
         final = self._write(chat, revised=True)
-        issues = check(final, known)
+        issues = check(final, known) + self._mix_issues(final, workspace)
 
         return StrategyDoc(
             **final.model_dump(),

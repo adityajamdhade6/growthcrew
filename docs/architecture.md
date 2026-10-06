@@ -224,6 +224,11 @@ optional Sentry (`observability.py`).
   dark or system theme, a phone "More" menu, and a read-only demo login
   (`GROWTHCREW_DEMO=1`, viewer role) with a five-step tour. The demo uses sample data only.
 
+## MixLab connection
+
+See [mixlab.md](mixlab.md): the strategist checks its channel plan against MixLab's budget
+split and interval (`integrations/mixlab.py`), and final verdicts go back as calibration.
+
 ## The weekly cycle
 
 ```mermaid
