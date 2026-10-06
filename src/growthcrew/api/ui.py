@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import Engine, func
 from sqlmodel import Session, select
 
-from growthcrew import budget, config
+from growthcrew import budget, budgets, config, tracing
 from growthcrew.agents.orchestrator import timeline
 from growthcrew.agents.research import load_latest_research
 from growthcrew.agents.strategist import SECTIONS, StrategistAgent, load_latest_strategy
@@ -842,3 +842,30 @@ def mcp_approval(workspace: str, body: ApprovalIn, request: Request) -> dict:
 
     token = guard(lambda: mint_approval(workspace, body.action, _person(request)))
     return {"token": token, "expires_in": TOKEN_TTL, "action": body.action}
+
+
+# --- tracing and agent limits ---
+
+
+@router.get("/cycles/{cycle_id}/trace")
+def cycle_trace(cycle_id: int, engine: Engine = Depends(engine_dep)) -> dict:
+    """The cycle's trace: stages, model calls and tool calls with tokens, cost and latency."""
+    with Session(engine) as session:
+        cycle = session.get(Cycle, cycle_id)
+    if not cycle.trace_id:
+        return {"trace_id": "", "spans": []}
+    return {"trace_id": cycle.trace_id, "spans": tracing.tree(engine, cycle.trace_id)}
+
+
+@router.get("/cycles/{cycle_id}/trace.otlp.json")
+def cycle_trace_otlp(cycle_id: int, engine: Engine = Depends(engine_dep)) -> dict:
+    """The same trace in OTLP/JSON, to load into Jaeger, Tempo, Langfuse or a collector."""
+    with Session(engine) as session:
+        cycle = session.get(Cycle, cycle_id)
+    return tracing.otlp(engine, cycle.trace_id) if cycle.trace_id else {"resourceSpans": []}
+
+
+@router.get("/costs/agents")
+def agent_limits(days: int = 7, engine: Engine = Depends(engine_dep)) -> list[dict]:
+    """Per agent: calls, mean and p95 cost and latency against their limits (admin only)."""
+    return budgets.report(engine, days)

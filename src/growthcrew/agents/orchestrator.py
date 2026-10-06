@@ -44,6 +44,7 @@ from growthcrew.naming import display, piece_name, plural
 from growthcrew.panel.cycle import pretest_cycle
 from growthcrew.reports.content import save_batch
 from growthcrew.reports.strategy import save_strategy
+from growthcrew.tracing import new_trace_id, span
 from growthcrew.versions import strategy_version
 from growthcrew.workflow import STAGES
 
@@ -120,13 +121,31 @@ class Orchestrator:
 
     def start_cycle(self, workspace: str) -> Cycle:
         with Session(self.engine, expire_on_commit=False) as session:
-            cycle = Cycle(workspace=workspace, week_start=budget.week_start())
+            cycle = Cycle(
+                workspace=workspace, week_start=budget.week_start(), trace_id=new_trace_id()
+            )
             session.add(cycle)
             session.commit()
             return cycle
 
     def run(self, cycle_id: int) -> Cycle:
-        """Run automated stages from wherever the cycle is, until approval or a halt."""
+        """Run automated stages from wherever the cycle is, until approval or a halt.
+
+        Each run is a span in the cycle's trace; each stage is a span inside it.
+        """
+        with Session(self.engine, expire_on_commit=False) as session:
+            cycle = session.get(Cycle, cycle_id)
+            if not cycle.trace_id:
+                cycle.trace_id = new_trace_id()
+                session.add(cycle)
+                session.commit()
+        with span(self.engine, f"weekly cycle {cycle_id}", "cycle", cycle.workspace,
+                  trace_id=cycle.trace_id, cycle_id=cycle_id) as attrs:  # fmt: skip
+            result = self._run(cycle_id)
+            attrs["stage"] = result.stage
+            return result
+
+    def _run(self, cycle_id: int) -> Cycle:
         while True:
             with Session(self.engine, expire_on_commit=False) as session:
                 cycle = session.get(Cycle, cycle_id)
@@ -147,6 +166,14 @@ class Orchestrator:
             session.commit()
 
         started = time.monotonic()
+        with span(self.engine, stage, "stage", workspace) as attrs:
+            status, detail, halted, state_json = self._attempt_stage(cycle, stage, workspace)
+            attrs.update(status=status, detail=detail[:300])
+        self._finish(cycle, task, stage, workspace, status, detail, halted, state_json,
+                     last_call, started)  # fmt: skip
+        return halted is None
+
+    def _attempt_stage(self, cycle: Cycle, stage: str, workspace: str):
         status, halted, state_json = "done", None, None
         try:
             budget.check(self.engine, workspace)
@@ -161,7 +188,10 @@ class Orchestrator:
             logger.exception("Cycle %s failed at %s", cycle.id, stage)
             status, detail = "failed", f"{type(exc).__name__}: {exc}"
             halted = f"{stage} failed: {detail}"
+        return status, detail, halted, state_json
 
+    def _finish(self, cycle, task, stage, workspace, status, detail, halted, state_json,
+                last_call, started) -> None:  # fmt: skip
         duration = int((time.monotonic() - started) * 1000)
         with Session(self.engine) as session:
             task = session.get(Task, task.id)
@@ -182,7 +212,6 @@ class Orchestrator:
                     row.state_json = state_json
             session.add(row)
             session.commit()
-        return halted is None
 
     def _record_runs(self, session: Session, task: Task, last_call: int, duration: int) -> None:
         """One AgentRun per agent that made LLM calls during this task."""

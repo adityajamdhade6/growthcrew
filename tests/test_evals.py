@@ -117,7 +117,11 @@ def test_judge_agreement_metrics():
 
 def test_golden_fixtures_are_well_formed():
     result = suites.golden_dataset()
-    assert result.metrics["brands"] == 3 and result.metrics["requests"] == 30
+    assert (
+        result.metrics["brands"] == 3
+        and result.metrics["requests"] == 75
+        and result.metrics["hard_cases"] >= 15
+    )
     assert result.status in ("pending", "pass")
     for brand in BRANDS.values():
         evidence = build_evidence(brand, research_fixture(brand))

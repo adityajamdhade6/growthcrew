@@ -31,7 +31,8 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - `src/growthcrew/analytics/`: CSV ingest and piece matching (`ingest.py`), registrations and final verdicts (`registry.py`), and the weekly numbers (`analysis.py`). No model calls in this package.
 - `src/growthcrew/reports/`: Markdown and PDF rendering of agent outputs.
 - `src/growthcrew/db/`: SQLModel models and migrations.
-- `evals/`: the regression suite. `golden/` (3 fictional brands x 10 requests), `calibration/` (20 pieces plus human scores), `suites.py` (one function per eval), `judge.py` (fixed rubrics), `run.py` (scorecard).
+- `evals/`: the regression suite. `golden/` (3 fictional brands x 25 requests, hard cases marked), `calibration/` (20 pieces with human scores, 50 pairs with human preferences), `suites.py` (one function per eval), `judge.py` (fixed rubrics and the position-swapped pairwise judge), `redteam.py` (attacks that must fail), `gate.py` (the CI gate against `baseline.json`), `routing.py` (model-routing experiment), `run.py` (scorecard).
+- `src/growthcrew/tracing.py` (one trace per cycle, OTLP export) and `budgets.py` (per-agent cost and latency limits with alerts).
 - `web/`: the Next.js + Tailwind app. Client components fetch through `lib/api.ts` (`/api` is proxied to FastAPI). Screens live in `app/(app)/`; shared pieces in `components/`.
 - `src/growthcrew/api/`: `main.py` (workflow routes), `ui.py` (routes the web app needs), `auth.py` (login, tokens, workspace access), `deps.py`.
 - `docs/`: architecture (agents, data flow, storage), roadmap (what is planned and why, including sequential stopping), case study, launch copy, self-review, and the README's demo GIF.
@@ -62,6 +63,7 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - Analytics rows that cannot be matched to a piece are reported as unmatched, never assigned by guess.
 - A draft with a guardrail violation is `blocked`: it cannot be approved, only rejected or edited until clean. Do not add a way around this.
 - Golden references and calibration scores come from a human. Never fill in `reference`, `approved_by` or `human_score` yourself, and never report a pending or skipped eval as passed.
+- Every red-team case must pass; never weaken a case or delete one to get green. Update `evals/baseline.json` only in its own commit that says why, never to hide a regression. A pairwise preference counts only if it survives swapping the order.
 - When a rubric in `evals/judge.py` changes, bump `RUBRIC_VERSION` and re-run calibration.
 - Every API route goes through `api.auth.authorize`: a valid token, and access to the workspace the route names or the row it addresses. A new id-based route must use `draft_id`, `cycle_id`, `item_id` or `signal_id` as its path parameter so that check applies (add a new one to `auth.ID_PARAMS`). The reviewer and publisher recorded on a decision are the signed-in user, never a name from the request body.
 - In the web app, every data view handles loading, empty and error states, and every action surfaces the server's error message. Check new screens at phone width; the review panel must stay usable one-handed.
@@ -108,6 +110,7 @@ From the v2 upgrade pack (13 phases). They apply to every phase.
 - MCP server: `uv run growthcrew mcp serve --user you@example.com`; connect a source: `uv run growthcrew connect <workspace> brevo --key-env BREVO_KEY --set list_id=4`; sync: `uv run growthcrew sync <workspace>`; scheduler: `uv run growthcrew scheduler [--loop] [--analyse]`
 - Weekly cycle: `uv run growthcrew cycle <workspace>` (or `POST /workspaces/<workspace>/cycles`)
 - Evals: `make eval` (offline, free) and `make eval-live [LIMIT=5]` (calls the model). Scorecard in `evals/results/`.
+- CI gate locally: `make eval && make eval-gate`; routing experiment (costs money): `make eval-routing LIMIT=6`; a cycle's trace: `uv run growthcrew trace <cycle> [--otlp file.json]`
 - Cost dashboard: `/costs/dashboard?workspace=<workspace>`
 - Twelve simulated weeks through the pattern miner: `uv run python -c "from sqlmodel import SQLModel, create_engine; from growthcrew.db import models; from growthcrew.memory.simulate import run; e = create_engine('sqlite://'); SQLModel.metadata.create_all(e); [print(w) for w in run(e)]"`
 - Experiment engine simulation report (writes charts to `reports/experiments/`): `uv run python -m evals.experiments_report`

@@ -121,6 +121,20 @@ EXPERIMENT_MDE = 0.3
 PANEL_SIZE = int(os.getenv("GROWTHCREW_PANEL_SIZE", "24"))
 PANEL_BATCH = 8
 
+# Per-agent limits on one model call: cost in USD and latency in ms. A call over either raises
+# an alert (once per agent per day); it is not stopped, since the weekly budget does that.
+AGENT_LIMITS: dict[str, tuple[float, int]] = {
+    "research": (0.60, 120_000),
+    "strategist": (1.20, 180_000),
+    "content": (0.40, 90_000),
+    "critic": (0.30, 90_000),
+    "analyst": (0.40, 90_000),
+    "monitor": (0.30, 60_000),
+    "creative": (0.20, 60_000),
+    "vision_critic": (0.40, 90_000),
+    "panel": (0.10, 45_000),
+}
+
 # Hard cap on tool calls in one research run.
 RESEARCH_MAX_TOOL_CALLS = 25
 

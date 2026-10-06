@@ -109,6 +109,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--loop", action="store_true", help="Keep running, checking every hour")
     p.add_argument("--analyse", action="store_true", help="Also run the weekly analyst")
 
+    p = commands.add_parser("trace", help="Print a weekly cycle's trace, or export it as OTLP")
+    p.add_argument("cycle", type=int)
+    p.add_argument("--otlp", type=Path, help="Write the trace as OTLP/JSON to this file")
+
     p = commands.add_parser("cycle", help="Run this week's cycle up to the approval stage")
     p.add_argument("workspace")
     p.add_argument("--max-items", type=int, default=5)
@@ -317,6 +321,24 @@ def main(argv: list[str] | None = None) -> int:
             if not args.loop:
                 break
             time.sleep(3600)
+    elif args.command == "trace":
+        from sqlmodel import Session
+
+        from growthcrew import tracing
+        from growthcrew.db.models import Cycle
+        from growthcrew.db.session import get_engine
+
+        engine = get_engine()
+        with Session(engine) as session:
+            cycle = session.get(Cycle, args.cycle)
+        if cycle is None or not cycle.trace_id:
+            print(f"Cycle {args.cycle} has no trace")
+            return 1
+        if args.otlp:
+            args.otlp.write_text(json.dumps(tracing.otlp(engine, cycle.trace_id), indent=2))
+            print(f"Wrote {args.otlp}")
+        else:
+            print(tracing.render(tracing.tree(engine, cycle.trace_id)))
     elif args.command == "user":
         import getpass
 

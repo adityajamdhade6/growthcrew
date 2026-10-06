@@ -65,3 +65,22 @@ def agreement(judge: list[float], human: list[float], pass_mark: int = 8) -> dic
         ),
         "judge_mean_minus_human_mean": round(statistics.mean(judge) - statistics.mean(human), 2),
     }
+
+
+def wilson(successes: float, n: int, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson interval for a proportion. Ties count as half a win before calling this."""
+    if n == 0:
+        return 0.0, 1.0
+    p = successes / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / (1 + z * z / n)
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
+def win_rate(preferences: list[str]) -> dict:
+    """Win rate of "new" over "old" from pairwise preferences (new, old, tie), with its interval."""
+    n = len(preferences)
+    wins = sum(p == "new" for p in preferences) + 0.5 * sum(p == "tie" for p in preferences)
+    low, high = wilson(wins, n)
+    return {"pairs": n, "win_rate": round(wins / n, 3) if n else 0.0,
+            "ci_low": round(low, 3), "ci_high": round(high, 3)}  # fmt: skip

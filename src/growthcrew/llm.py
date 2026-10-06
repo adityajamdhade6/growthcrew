@@ -6,10 +6,13 @@ and cost. `LLM.conversation` does the same for multi-turn tool use.
 """
 
 import base64
+import json
 import logging
+import secrets
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
 import anthropic
@@ -18,9 +21,9 @@ from sqlalchemy import Engine
 from sqlmodel import Session
 from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
-from growthcrew import budget, config
+from growthcrew import budget, budgets, config, tracing
 from growthcrew.config import AgentRole
-from growthcrew.db.models import LLMCall, RoleModel
+from growthcrew.db.models import LLMCall, RoleModel, Span
 from growthcrew.db.session import get_engine
 from growthcrew.versions import prompt_version
 
@@ -227,9 +230,27 @@ class LLM:
         return replace(base, model=choice.model, effort=effort)
 
     def _log(self, row: LLMCall) -> None:
-        with Session(self.engine) as session:
+        context = tracing.current()
+        if context:
+            row.trace_id, row.span_id = context.trace_id, secrets.token_hex(8)
+        with Session(self.engine, expire_on_commit=False) as session:
             session.add(row)
             session.commit()
+        if context:
+            # Each model call is a span in the cycle's trace, with its tokens and cost.
+            ended = datetime.now(UTC)
+            tracing.record(self.engine, Span(
+                trace_id=context.trace_id, span_id=row.span_id, parent_id=context.span_id,
+                name=row.agent, kind="llm", workspace=row.workspace or "",
+                started_at=ended - timedelta(milliseconds=row.latency_ms), ended_at=ended,
+                duration_ms=row.latency_ms, status="ok" if row.success else "error",
+                attributes=json.dumps({
+                    "model": row.model, "input_tokens": row.input_tokens,
+                    "output_tokens": row.output_tokens, "cost_usd": row.cost_usd,
+                    "stop_reason": row.stop_reason, "tag": row.tag, "error": row.error,
+                }),
+            ))  # fmt: skip
+        budgets.check_call(self.engine, row)
 
 
 class Conversation:
@@ -300,7 +321,11 @@ class Conversation:
         else:
             self.tool_calls_used += 1
             try:
-                content = self.tools[block.name].fn(**block.input)
+                if tracing.current():
+                    with tracing.span(self.llm.engine, block.name, "tool", self.workspace or ""):
+                        content = self.tools[block.name].fn(**block.input)
+                else:
+                    content = self.tools[block.name].fn(**block.input)
             except Exception as exc:
                 content, is_error = f"{type(exc).__name__}: {exc}", True
         remaining = max(0, max_tool_calls - self.tool_calls_used)

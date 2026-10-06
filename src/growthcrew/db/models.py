@@ -31,6 +31,9 @@ class LLMCall(SQLModel, table=True):
     stop_reason: str | None = None
     success: bool = True
     error: str | None = None
+    # The trace and span this call belongs to, when it ran inside a traced cycle.
+    trace_id: str = Field(default="", index=True)
+    span_id: str = ""
 
 
 class BrainVersion(SQLModel, table=True):
@@ -66,6 +69,8 @@ class Cycle(SQLModel, table=True):
     """One weekly cycle for a workspace. `stage` is the state machine's current state."""
 
     id: int | None = Field(default=None, primary_key=True)
+    # Every stage, model call and tool call of this cycle is a span in this trace.
+    trace_id: str = ""
     workspace: str = Field(index=True)
     week_start: datetime
     stage: str = "research"
@@ -570,3 +575,23 @@ class ApprovalTokenUse(SQLModel, table=True):
     workspace: str
     action: str
     approved_by: str
+
+
+class Span(SQLModel, table=True):
+    """One timed step in a trace: a weekly cycle, a stage, an agent's model call or a tool call."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    trace_id: str = Field(index=True)
+    span_id: str = Field(index=True)
+    parent_id: str = ""
+    name: str
+    # cycle, stage, llm, tool
+    kind: str
+    workspace: str = Field(default="", index=True)
+    started_at: datetime = Field(default_factory=_now)
+    ended_at: datetime | None = None
+    duration_ms: int = 0
+    # ok, error
+    status: str = "ok"
+    # Tokens, cost, model, stage detail, as JSON.
+    attributes: str = "{}"

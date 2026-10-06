@@ -172,6 +172,31 @@ pick a tool; the research agent's tool results are wrapped the same way. Output 
 code afterwards: uncited findings are dropped, quotes must be verbatim, links must be known.
 Text that reads like instructions to a model is flagged on the signal for the reader.
 
+## Evals, red team, tracing and the CI gate
+
+- **Tracing** (`tracing.py`). Each weekly cycle is one trace: a span for the run, one per
+  stage, one per model call (model, tokens, cost, latency, stop reason) and one per tool call.
+  `GET /cycles/{id}/trace` returns it as a tree; `/trace.otlp.json` and `growthcrew trace
+  <cycle> --otlp` export OTLP/JSON for Jaeger, Tempo or Langfuse.
+- **Agent limits** (`budgets.py`). Each agent has a cost and latency limit per call
+  (`config.AGENT_LIMITS`); a call over it raises one alert per agent per day.
+  `/costs/agents` shows mean and p95 against the limits.
+- **Golden set**: 3 brands x 25 requests, 21 of them hard cases (regulated categories, thin
+  brand data, conflicting research, named competitors). References are written by a person.
+- **Pairwise evals** (`judge.judge_pair`). New output against the last run's, judged in both
+  orders; a preference counts only if it survives the swap. Reported as a win rate with a
+  Wilson 95% interval. The pairwise judge is trusted only after it agrees with people on 50
+  labelled pairs at 75% or more.
+- **Red team** (`evals/redteam.py`). 39 attacks that must all fail: injected pages, uploads
+  and posts; invented ratings, counts and testimonials; defamation; health, finance and legal
+  claims; reading another workspace's rows through every id-based route and over MCP;
+  runaway spending and tool loops; approving blocked drafts and reusing approval tokens.
+- **Gate** (`evals/gate.py`). CI fails a pull request on any failed eval, any red-team
+  failure, or a tracked metric falling beyond its tolerance against `evals/baseline.json`,
+  and posts the scorecard as a comment.
+- **Routing experiment** (`evals/routing.py`, `make eval-routing`). Cheaper drafting models
+  against the defaults: judge score with a bootstrap interval and cost per piece, per arm.
+
 ## The weekly cycle
 
 ```mermaid
@@ -257,6 +282,7 @@ columns added at startup; there is no migration tool yet.
 | `KeywordRank` | Search Console rows: each query's position, clicks and impressions by date |
 | `Creative` | Each rendered size of an ad image per critic round: slots, scores, fixes, measured checks, whether it passed, whether any image on it was AI-generated |
 | `Persona`, `PanelRun` | Synthetic personas by generation, with their evidence; each pre-test with every reaction, the predicted ranking, the advice and the trust level at the time |
+| `Span` | Trace spans: cycle, stage, model call and tool call, with timings and attributes |
 | `ConnectorCredential`, `SyncRun`, `CrmSnapshot`, `ApprovalTokenUse` | Encrypted per-workspace credentials, each sync's result, daily CRM counts, spent MCP approval tokens |
 | `Signal` | Monitor findings with their sources and dates, importance, status (new, sent, dismissed) and who decided |
 

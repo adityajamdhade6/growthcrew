@@ -79,7 +79,7 @@ From `make eval` (offline; no API key). Full output in `evals/results/scorecard.
 | Bandit against an even budget split | 61% fewer clicks given up over 8 simulated weeks |
 | Analyst: simulated weeks, end to end through CSV ingest | 10 of 10 correct |
 | Guardrails: labelled cases | 28 of 28 (every must-block line blocked, no false blocks) |
-| Golden set (3 brands x 10 requests) | Built; 0 of 30 human reference outputs written yet |
+| Golden set (3 brands x 25 requests, 21 hard cases) | Built; 0 of 75 human reference outputs written yet |
 | Judge calibration against 20 human scores | Pieces ready; 0 of 20 human scores yet |
 | Strategy, content and research evals | Written; need the live model (`make eval-live`) |
 

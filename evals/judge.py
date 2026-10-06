@@ -4,6 +4,8 @@ Bump RUBRIC_VERSION whenever a rubric's wording changes: scores from different v
 not comparable, and the judge must be re-calibrated against human scores.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 from growthcrew.agents.strategy_models import StrategyCore
@@ -94,3 +96,42 @@ def judge_strategy(llm: LLM, brand: Brain, evidence: str, strategy: StrategyCore
         workspace=brand.workspace,
         tag="eval-judge",
     )
+
+
+PAIRWISE_RUBRIC = """You compare two pieces of marketing content written for the same small \
+business and the same request. Decide which one the business should publish, judging voice, \
+clarity, persuasion, accuracy (any statistic, name or testimonial not in the brand's proof \
+counts heavily against a piece), fit for the channel, and freedom from stock phrases. Say \
+"tie" only if you would genuinely publish either. The order the pieces are shown in means \
+nothing; judge each on its merits."""
+
+
+class PairChoice(BaseModel):
+    better: Literal["first", "second", "tie"]
+    reason: str
+
+
+def judge_pair(llm: LLM, brand: Brain, content_type: str, a: str, b: str) -> str:
+    """Which of two pieces is better: "a", "b" or "tie". Judged twice, in both orders.
+
+    A preference counts only when it survives swapping the order; otherwise it is a tie. This
+    removes the judge's position bias from the result instead of averaging over it.
+    """
+
+    def ask(first: str, second: str) -> str:
+        return llm.call(
+            AgentRole.JUDGE,
+            system=PAIRWISE_RUBRIC,
+            user=f"{render_brain(brand)}\n\nContent type: {content_type}\n\n"
+            f"<first>\n{first}\n</first>\n\n<second>\n{second}\n</second>",
+            output_model=PairChoice,
+            workspace=brand.workspace,
+            tag="eval-judge-pair",
+        ).better
+
+    forward, backward = ask(a, b), ask(b, a)
+    if forward == "first" and backward == "second":
+        return "a"
+    if forward == "second" and backward == "first":
+        return "b"
+    return "tie"

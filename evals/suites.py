@@ -51,13 +51,18 @@ def golden_dataset() -> EvalResult:
         ContentRequest.model_validate(item["request"])
     per_brand = {brand: sum(item["brand"] == brand for item in items) for brand in BRANDS}
     approved = sum(bool(item["approved_by"] and item["reference"]) for item in items)
-    complete = all(count == 10 for count in per_brand.values()) and len(per_brand) == 3
+    complete = all(count == 25 for count in per_brand.values()) and len(per_brand) == 3
     return EvalResult(
         name="golden_dataset",
         agent="dataset",
         status="fail" if not complete else ("pending" if approved < len(items) else "pass"),
-        metrics={"brands": len(per_brand), "requests": len(items), "approved_references": approved},
-        thresholds={"requests": "3 brands x 10", "approved_references": len(items)},
+        metrics={
+            "brands": len(per_brand),
+            "requests": len(items),
+            "hard_cases": sum(item.get("case", "standard") != "standard" for item in items),
+            "approved_references": approved,
+        },
+        thresholds={"requests": "3 brands x 25", "approved_references": len(items)},
         notes=[]
         if approved == len(items)
         else [
@@ -364,6 +369,115 @@ def calibration_status() -> EvalResult:
     )
 
 
+# --- red team ---
+
+
+def red_team() -> EvalResult:
+    """Attacks that must all fail: one success fails the suite and blocks the merge."""
+    from evals.redteam import run_all
+
+    cases = run_all()
+    by_category: dict[str, list[int]] = {}
+    for case in cases:
+        tally = by_category.setdefault(case.category, [0, 0])
+        tally[0] += case.passed
+        tally[1] += 1
+    failed = [case for case in cases if not case.passed]
+    return EvalResult(
+        name="red_team",
+        agent="all",
+        status="fail" if failed else "pass",
+        metrics={"cases": len(cases), "passed": len(cases) - len(failed),
+                 **{f"{k}_passed": f"{v[0]}/{v[1]}" for k, v in sorted(by_category.items())}},
+        thresholds={"passed": "all"},
+        notes=[f"FAILED {c.category}: {c.name} {c.detail}".strip() for c in failed],
+    )  # fmt: skip
+
+
+# --- pairwise judging ---
+
+PAIR_AGREEMENT = 0.75
+LAST_CONTENT: dict[str, dict] = {}
+
+
+def pair_labels() -> list[dict]:
+    with (HERE / "calibration/pair_labels.csv").open(newline="") as handle:
+        return [row for row in csv.DictReader(handle) if row["human_preference"].strip()]
+
+
+def pairwise_calibration_status() -> EvalResult:
+    labelled = len(pair_labels())
+    return EvalResult(
+        name="pairwise_judge_calibration",
+        agent="judge",
+        status="pending" if labelled < 50 else "skipped",
+        metrics={"labelled_pairs": labelled, "needed": 50},
+        notes=[f"{50 - labelled} pairs still need a human preference (a, b or tie) in "
+               "evals/calibration/pair_labels.csv"
+               if labelled < 50 else "Labels are in; run `make eval-live` to check the judge"],
+    )  # fmt: skip
+
+
+def live_pairwise_calibration(llm) -> EvalResult:
+    from evals.judge import judge_pair
+
+    labels = pair_labels()
+    if len(labels) < 50:
+        return pairwise_calibration_status()
+    pieces = {p["id"]: p for p in _load("calibration/pieces.json")["pieces"]}
+    agree = 0
+    for row in labels:
+        a, b = pieces[row["a"]], pieces[row["b"]]
+        verdict = judge_pair(llm, BRANDS[a["brand"]], a["content_type"], a["text"], b["text"])
+        agree += verdict == row["human_preference"].strip().lower()
+    rate = agree / len(labels)
+    return EvalResult(
+        name="pairwise_judge_calibration",
+        agent="judge",
+        status="pass" if rate >= PAIR_AGREEMENT else "fail",
+        metrics={"pairs": len(labels), "judge_human_agreement": round(rate, 3)},
+        thresholds={"judge_human_agreement": f">= {PAIR_AGREEMENT}"},
+        notes=[] if rate >= PAIR_AGREEMENT else
+        ["The judge disagrees with people too often to be trusted; pairwise results are void"],
+    )  # fmt: skip
+
+
+def live_pairwise_content(llm, previous_path: Path) -> EvalResult:
+    """This run's content against the last run's, request by request, judged pairwise."""
+    from evals.judge import judge_pair
+
+    if not previous_path.exists() or not LAST_CONTENT:
+        if LAST_CONTENT:
+            previous_path.write_text(json.dumps(LAST_CONTENT, indent=2))
+        return EvalResult(
+            name="pairwise_content",
+            agent="content",
+            status="skipped",
+            notes=["No earlier run to compare with; this run is now the baseline"],
+        )
+    previous = json.loads(previous_path.read_text())
+    preferences = []
+    for key, new in LAST_CONTENT.items():
+        old = previous.get(key)
+        if not old or old["text"] == new["text"]:
+            continue
+        verdict = judge_pair(llm, BRANDS[new["brand"]], new["content_type"], new["text"],
+                             old["text"])  # fmt: skip
+        preferences.append({"a": "new", "b": "old", "tie": "tie"}[verdict])
+    result = metrics.win_rate(preferences)
+    previous_path.write_text(json.dumps(LAST_CONTENT, indent=2))
+    # A regression is a new version that is clearly worse: its whole interval below a half.
+    ok = not preferences or result["ci_high"] >= 0.5
+    return EvalResult(
+        name="pairwise_content",
+        agent="content",
+        status="pass" if ok else "fail",
+        metrics=result,
+        thresholds={"win_rate 95% CI": "upper bound >= 0.5 (not clearly worse)"},
+        notes=["Win rate of this version over the last one; ties count half"],
+    )
+
+
 # --- live evals (model calls) ---
 
 
@@ -415,12 +529,17 @@ def live_content(
 
     agent = ContentAgent(llm, root=root)
     rows, overall, passed, rounds = [], [], 0, []
+    outputs: dict[str, dict] = {}
     items = golden_items()[:limit] if limit else golden_items()
     for item in items:
         brand = BRANDS[item["brand"]]
         request = ContentRequest.model_validate(item["request"])
         records, _ = agent.produce(request, brand, strategies[item["brand"]], item["id"])
         for record in records:
+            outputs[f"{item['id']}|{record.angle or ''}"] = {
+                "brand": item["brand"], "content_type": request.content_type,
+                "text": record.final.text,
+            }  # fmt: skip
             rows.append(content_checks(record.final.text, brand, strategies[item["brand"]]))
             overall.append(
                 judge_content(llm, brand, request.content_type, record.final.text).overall
@@ -436,6 +555,7 @@ def live_content(
         "judge_would_approve_rate": round(sum(score >= 8 for score in overall) / len(overall), 2),
     }
     ok = _content_ok(summary) and summary["mean_judge_overall"] >= 7
+    LAST_CONTENT.update(outputs)
     return EvalResult(
         name="content",
         agent="content",

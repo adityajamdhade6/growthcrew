@@ -46,6 +46,13 @@ SENSITIVE: dict[str, tuple[str, ...]] = {
         r"\bfinancial freedom\b",
         r"\bcan't lose\b",
     ),
+    "legal": (
+        r"\bguaranteed? (to )?(win|settlement|approval|outcome|visa|acquittal)",
+        r"\b(win|wins|won) your (case|claim|lawsuit)\b",
+        r"\b(100%|fully|completely) (legal|compliant|lawsuit[- ]proof)\b",
+        r"\bno (legal )?liability\b",
+        r"\bavoid (all )?(taxes|tax entirely|prosecution)\b",
+    ),
 }
 
 
