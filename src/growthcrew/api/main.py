@@ -29,6 +29,7 @@ from growthcrew.api.deps import (  # noqa: F401  (re-exported for dependency ove
     templates,
 )
 from growthcrew.api.ui import router as ui_router
+from growthcrew.api.ux import router as ux_router
 from growthcrew.db.models import (
     Alert,
     Approval,
@@ -62,6 +63,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="GrowthCrew", dependencies=[Depends(authorize)], lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(ui_router)
+app.include_router(ux_router)
 _templates = templates
 _guard = guard
 

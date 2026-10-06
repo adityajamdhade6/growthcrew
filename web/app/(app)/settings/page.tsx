@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { api, ApiError, useApi } from "@/lib/api";
 import { label, money, useSession } from "@/lib/session";
+import { ThemePicker } from "@/components/demo";
 import { Badge, Button, Card, ErrorState, Field, inputClass, Loading, Notice, PageHeader } from "@/components/ui";
 
 type Guide = { sentence_length: string; jargon_level: string; banned_phrases: string[]; rules: string[] };
@@ -255,6 +256,32 @@ function McpApproval({ workspace }: { workspace: string }) {
   );
 }
 
+function ApprovalChannels({ workspace }: { workspace: string }) {
+  const [hook, setHook] = useState("");
+  const [signing, setSigning] = useState("");
+  const [member, setMember] = useState({ email: "", slack_user_id: "" });
+  const { busy, error, saved, save } = useSaver();
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted">Approvers can approve or reject from a Slack message or from the weekly email digest. Every decision is recorded with who made it and where.</p>
+      {error && <ErrorState error={error} />}
+      {saved && <Notice tone="good">{saved}</Notice>}
+      <Field label="Slack incoming webhook URL"><input className={inputClass} value={hook} onChange={(e) => setHook(e.target.value)} placeholder="https://hooks.slack.com/services/..." /></Field>
+      <Field label="Slack signing secret" hint="Stored encrypted."><input className={inputClass} type="password" value={signing} onChange={(e) => setSigning(e.target.value)} /></Field>
+      <Button busy={busy} onClick={() => save(() => api(`/workspaces/${workspace}/connectors/slack/secrets`, { method: "PUT", body: { webhook_url: hook, signing_secret: signing } }), "Slack connected.")}>Connect Slack</Button>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Field label="Team member's email"><input className={inputClass} value={member.email} onChange={(e) => setMember({ ...member, email: e.target.value })} /></Field>
+        <Field label="Their Slack member ID"><input className={inputClass} value={member.slack_user_id} onChange={(e) => setMember({ ...member, slack_user_id: e.target.value })} placeholder="U012ABCDEF" /></Field>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button busy={busy} onClick={() => save(() => api(`/workspaces/${workspace}/members/slack`, { method: "PUT", body: member }), "Linked.")}>Link Slack user</Button>
+        <Button busy={busy} onClick={() => save(() => api(`/workspaces/${workspace}/slack/notify`, { method: "POST" }), "Posted to Slack.")}>Post pending drafts to Slack</Button>
+        <Button busy={busy} onClick={() => save(() => api(`/workspaces/${workspace}/digest/send`, { method: "POST" }), "Digest sent.")}>Send the email digest now</Button>
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { workspace, workspaces, user, signOut } = useSession();
   const name = workspaces.find((item) => item.workspace === workspace)?.name ?? workspace;
@@ -279,6 +306,14 @@ export default function Settings() {
         <Card>
           <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">Model choices {!user.is_admin && <Badge>Admin only</Badge>}</h2>
           {user.is_admin ? <ModelsCard /> : <p className="text-sm text-muted">Ask an admin to change which model each team member uses.</p>}
+        </Card>
+        <Card>
+          <h2 className="mb-3 text-base font-semibold">Appearance</h2>
+          <ThemePicker />
+        </Card>
+        <Card>
+          <h2 className="mb-3 text-base font-semibold">Approve from Slack and email</h2>
+          <ApprovalChannels key={workspace} workspace={workspace} />
         </Card>
         <Card>
           <h2 className="mb-2 text-base font-semibold">Account</h2>

@@ -668,3 +668,13 @@ class SystemFlag(SQLModel, table=True):
     value: str
     set_by: str
     set_at: datetime = Field(default_factory=_now)
+
+
+class ChannelIdentity(SQLModel, table=True):
+    """Who a Slack user is in GrowthCrew, so a button press is a named person's decision."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    channel: str = "slack"
+    external_id: str = Field(index=True)
+    user_id: int

@@ -207,6 +207,23 @@ killed worker's cycle is resumed by another; model responses cached per cycle by
 the kill switch and the log scrubber (`safety.py`); request rate limits; health checks and
 optional Sentry (`observability.py`).
 
+## Product UX v2: approval channels, live mission, replay
+
+- **Approval channels** (`approvals.py`, routes in `api/ux.py`): Slack interactive messages
+  (signature checked with the workspace's signing secret, rejected after 5 minutes; the Slack
+  user must be linked to a GrowthCrew user) and a weekly email digest with one signed link per
+  decision. A link names the user, the draft and the decision, expires in 72 hours, works once,
+  and only opens a confirmation page, so a mail scanner cannot approve. Both paths need the
+  approver or owner role, end in `workflow.decide` and are written to the audit log with the
+  channel. Linked Slack users live in `ChannelIdentity` (migration 0003).
+- **Mission control** streams the cycle over server-sent events (`/mission/stream`), falling
+  back to polling; **replay** steps through a past week's stages.
+- **Review panel**: keyboard shortcuts (A approve, R reject, E edit, J/K next/previous) and a
+  tracked-changes view of human edits (`web/lib/diff.ts`).
+- **Creative gallery** and **Evals** pages (scorecard plus the latest cycle's trace), a light,
+  dark or system theme, a phone "More" menu, and a read-only demo login
+  (`GROWTHCREW_DEMO=1`, viewer role) with a five-step tour. The demo uses sample data only.
+
 ## The weekly cycle
 
 ```mermaid
@@ -306,6 +323,7 @@ Fetched pages and search results are cached on disk under `.cache/` for up to a 
 - **API** (`api/`): FastAPI. Every route requires a signed token and access to the workspace
   involved.
 - **Web app** (`web/`): Next.js, talking to the API through a same-origin proxy.
+- **Slack and email** (`approvals.py`): approve or reject pending drafts; see above.
 - **Streamlit demo** (`streamlit_app.py`): read-only, sample data.
 - **CLI** (`cli.py`): onboarding, research, monitoring, strategy, content, cycles, users, the pilot.
 - **Evals** (`evals/`): the regression suite and scorecard, run in CI.

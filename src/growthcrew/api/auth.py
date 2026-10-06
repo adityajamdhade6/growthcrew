@@ -32,6 +32,9 @@ ID_PARAMS = (
 # The Google sign-in callback is reached by the browser without a token; its signed state
 # carries the workspace and the person who started it.
 PUBLIC_PATHS = {"/health", "/auth/login", "/docs", "/openapi.json", "/connectors/google/callback"}
+# Reached without a token: approval links carry their own signed token, and Slack's calls are
+# verified with the workspace's signing secret.
+PUBLIC_PREFIXES = ("/approve/", "/integrations/slack/")
 # Routes with no workspace in them that only an admin may use.
 ADMIN_PREFIXES = ("/costs", "/settings")
 # After this many wrong passwords for one email, sign-in is refused for LOCKOUT_SECONDS.
@@ -133,7 +136,7 @@ async def authorize(request: Request, engine: Engine = Depends(engine_dep)) -> N
     is confined to that workspace (`tenancy`), so a route cannot read another client's rows
     even by mistake. Async so the tenant it sets carries into the route."""
     path = request.url.path
-    if path in PUBLIC_PATHS:
+    if path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES):
         return
     header = request.headers.get("authorization", "")
     user_id = read_token(header.removeprefix("Bearer ").strip()) if header else None
@@ -174,7 +177,18 @@ class LoginIn(BaseModel):
 
 
 def _profile(user: User) -> dict:
-    return {"email": user.email, "is_admin": user.is_admin}
+    import json
+
+    roles = json.loads(user.roles or "{}")
+    return {
+        "email": user.email,
+        "is_admin": user.is_admin,
+        "roles": roles,
+        # The public demo login: read-only, sample data, with a guided tour.
+        "demo": os.getenv("GROWTHCREW_DEMO") == "1"
+        and bool(roles)
+        and set(roles.values()) == {"viewer"},
+    }
 
 
 @router.post("/auth/login")

@@ -130,3 +130,67 @@ export async function apiBlobUrl(path: string): Promise<string> {
   if (!response.ok) throw new ApiError(response.status, `Could not load the image (${response.status}).`);
   return URL.createObjectURL(await response.blob());
 }
+
+/**
+ * Subscribe to a server-sent event stream (with the bearer token, which EventSource cannot
+ * send). Calls `onData` with each event's JSON; reconnects after a drop; falls back to
+ * polling `path` without `/stream` if streaming is unavailable.
+ */
+export function useStream<T>(path: string | null, fallback: string | null): Loaded<T> {
+  const [data, setData] = useState<T>();
+  const [error, setError] = useState<ApiError | null>(null);
+  const [failed, setFailed] = useState(false);
+  const polled = useApi<T>(failed ? fallback : null, 4000);
+
+  useEffect(() => {
+    if (!path) return;
+    const controller = new AbortController();
+    let stopped = false;
+    async function run() {
+      while (!stopped) {
+        try {
+          const token = getToken();
+          const response = await fetch(`/api${path}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            signal: controller.signal,
+          });
+          if (!response.ok || !response.body) throw new ApiError(response.status, `Live updates unavailable (${response.status}).`);
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let cut;
+            while ((cut = buffer.indexOf("\n\n")) >= 0) {
+              const chunk = buffer.slice(0, cut);
+              buffer = buffer.slice(cut + 2);
+              const line = chunk.split("\n").find((part) => part.startsWith("data: "));
+              if (line) {
+                setData(JSON.parse(line.slice(6)) as T);
+                setError(null);
+              }
+            }
+          }
+        } catch (caught) {
+          if (stopped) return;
+          if (caught instanceof ApiError && caught.status >= 400 && caught.status < 500) {
+            setError(caught);
+            setFailed(true);
+            return;
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+    run();
+    return () => {
+      stopped = true;
+      controller.abort();
+    };
+  }, [path]);
+
+  if (failed) return polled;
+  return { data, error, loading: data === undefined && !error, reload: () => undefined };
+}

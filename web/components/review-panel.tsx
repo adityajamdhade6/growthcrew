@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { wordDiff } from "@/lib/diff";
 import { api, ApiError, useApi } from "@/lib/api";
 import { label } from "@/lib/session";
 import { Badge, Button, ErrorState, Field, inputClass, Loading, Notice, Sheet, statusTone } from "@/components/ui";
@@ -62,6 +63,27 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
       setBusy(false);
     }
   }
+
+  // Keyboard shortcuts on the review queue: A approve, R reject, E edit, J/K next/previous.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      if (!data || mode !== "view" || busy) return;
+      const key = event.key.toLowerCase();
+      const at = props.queue.indexOf(props.draftId);
+      if (key === "a" && data.status === "pending_approval") decide("approved");
+      else if (key === "r" && ["pending_approval", "blocked"].includes(data.status)) { setComment(""); setMode("reject"); }
+      else if (key === "e" && ["pending_approval", "blocked"].includes(data.status)) { setText(data.text); setComment(""); setMode("edit"); }
+      else if (key === "j" && at >= 0 && at < props.queue.length - 1) props.onOpen(props.queue[at + 1]);
+      else if (key === "k" && at > 0) props.onOpen(props.queue[at - 1]);
+      else return;
+      event.preventDefault();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   const decide = (decision: string, extra: object = {}) =>
     run(() => api(`/drafts/${props.draftId}/decision`, { method: "POST", body: { decision, comment, ...extra } }),
@@ -135,6 +157,7 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
             {data.edited && <Badge>Edited by you</Badge>}
             <span className="text-xs text-muted">{data.rounds} editor round{data.rounds === 1 ? "" : "s"}</span>
             {position >= 0 && props.queue.length > 1 && <span className="ml-auto text-xs font-medium text-muted">{position + 1} of {props.queue.length} to review</span>}
+            <span className="hidden w-full text-xs text-muted md:block">Keys: A approve · R reject · E edit · J/K next and previous</span>
           </div>
           {notice && <Notice tone="good">{notice}</Notice>}
           {error && <ErrorState error={error} />}
@@ -167,6 +190,17 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
               <Field label="Your version">
                 <textarea className={`${inputClass} font-mono`} rows={12} value={text} onChange={(event) => setText(event.target.value)} />
               </Field>
+              {text !== data.text && (
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase text-muted">Your changes</p>
+                  <div className="whitespace-pre-wrap rounded-xl border border-line bg-bg px-4 py-3 text-[15px] leading-relaxed" aria-label="Tracked changes">
+                    {wordDiff(data.text, text).map((piece, index) =>
+                      piece.kind === "same" ? <span key={index}>{piece.text}</span>
+                      : piece.kind === "removed" ? <del key={index} className="bg-bad-soft text-bad decoration-bad/70">{piece.text}</del>
+                      : <ins key={index} className="bg-good-soft text-good no-underline">{piece.text}</ins>)}
+                  </div>
+                </div>
+              )}
               <Field label="Why the change?" hint="Optional. Recurring edits become brand voice rules.">
                 <input className={inputClass} value={comment} onChange={(event) => setComment(event.target.value)} />
               </Field>

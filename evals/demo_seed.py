@@ -620,7 +620,13 @@ def main() -> None:
                               strategy_version=1))  # fmt: skip
         if not session.exec(select(User).where(User.email == DEMO_EMAIL)).first():
             session.commit()
-            create_user(engine, DEMO_EMAIL, DEMO_PASSWORD, "*")
+            # The public demo is read-only: a viewer on the sample workspace, never an admin.
+            demo = create_user(engine, DEMO_EMAIL, DEMO_PASSWORD, WORKSPACE)
+            with Session(engine) as fresh:
+                row = fresh.get(User, demo.id)
+                row.roles = json.dumps({WORKSPACE: "viewer"})
+                fresh.add(row)
+                fresh.commit()
         session.commit()
     seed_signals(engine)
     seed_panel(engine)

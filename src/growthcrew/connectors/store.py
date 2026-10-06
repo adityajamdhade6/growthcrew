@@ -9,13 +9,14 @@ from sqlmodel import Session, select
 from growthcrew import keys
 from growthcrew.db.models import ConnectorCredential, SyncRun
 
-PROVIDERS = ("google", "brevo", "hubspot", "mcp")
+PROVIDERS = ("google", "brevo", "hubspot", "mcp", "slack")
 # Settings each provider may store, and which of them are secret.
 SETTINGS = {
     "google": {"site_url", "ga4_property"},
     "brevo": {"list_id", "sender_name", "sender_email", "postal_address"},
     "hubspot": set(),
     "mcp": {"url", "tool", "arguments", "source", "fields"},
+    "slack": {"channel"},
 }
 
 
