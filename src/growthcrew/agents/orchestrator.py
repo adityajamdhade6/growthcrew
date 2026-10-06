@@ -7,6 +7,7 @@ after that are reached only through the human actions in `workflow.py`.
 import json
 import logging
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -35,15 +36,49 @@ from growthcrew.db.models import (
     Task,
 )
 from growthcrew.db.session import get_engine
-from growthcrew.llm import LLM
+from growthcrew.llm import LLM, cache_scope
+from growthcrew.memory import miner
+from growthcrew.monitor import signals as monitor_signals
+from growthcrew.monitor.run import MonitorRun, run_monitors
 from growthcrew.naming import display, piece_name, plural
+from growthcrew.panel.cycle import pretest_cycle
 from growthcrew.reports.content import save_batch
 from growthcrew.reports.strategy import save_strategy
+from growthcrew.tracing import new_trace_id, span
+from growthcrew.versions import strategy_version
 from growthcrew.workflow import STAGES
 
 logger = logging.getLogger(__name__)
 
 AUTOMATED = STAGES[: STAGES.index("awaiting_approval")]
+
+
+def draft_from_piece(piece, cycle_id: int, workspace: str, version: int) -> Draft:
+    """The Draft row for one written piece, waiting for a person (or blocked by a guardrail)."""
+    final = piece.final
+    return Draft(
+        cycle_id=cycle_id,
+        workspace=workspace,
+        piece_id=piece.id,
+        content_type=piece.request.content_type,
+        angle=piece.angle,
+        day=piece.day,
+        original_text=final.text,
+        text=final.text,
+        body_json=json.dumps(final.body),
+        metadata_json=final.metadata.model_dump_json(),
+        min_score=min(final.critique.scores().values()),
+        passed_critic=piece.passed,
+        prompt_version=piece.prompt_version,
+        strategy_version=version,
+        memory_json=piece.memory.model_dump_json(),
+        history_json=json.dumps([v.model_dump(mode="json") for v in piece.versions]),
+        status="blocked" if piece.blocked else "pending_approval",
+    )
+
+
+def _aware(moment: datetime) -> datetime:
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
 
 def _source_urls(report: ResearchReport | None) -> set[str]:
@@ -60,6 +95,8 @@ class Orchestrator:
         strategist: StrategistAgent | None = None,
         content: ContentAgent | None = None,
         max_items: int = 5,
+        monitors: Callable[[str], MonitorRun] | None = None,
+        panel: Callable[[int], list[str]] | None = None,
     ) -> None:
         self.engine = engine or (llm.engine if llm else get_engine())
         self.root = root
@@ -67,16 +104,51 @@ class Orchestrator:
         self.strategist = strategist or StrategistAgent(llm, root=root)
         self.content = content or ContentAgent(llm, root=root)
         self.max_items = max_items
+        # The weekly competitor, SEO and social monitors. Off when there is no model to call.
+        if monitors is None and llm is not None:
+
+            def monitors(workspace: str) -> MonitorRun:
+                return run_monitors(llm, self.engine, workspace, self.root)
+
+        self.monitors = monitors
+        # The synthetic panel's pre-test of each new experiment. Off without a model.
+        if panel is None and llm is not None:
+
+            def panel(cycle_id: int) -> list[str]:
+                return pretest_cycle(llm, self.engine, cycle_id, self.root)
+
+        self.panel = panel
 
     def start_cycle(self, workspace: str) -> Cycle:
         with Session(self.engine, expire_on_commit=False) as session:
-            cycle = Cycle(workspace=workspace, week_start=budget.week_start())
+            cycle = Cycle(
+                workspace=workspace, week_start=budget.week_start(), trace_id=new_trace_id()
+            )
             session.add(cycle)
             session.commit()
             return cycle
 
     def run(self, cycle_id: int) -> Cycle:
-        """Run automated stages from wherever the cycle is, until approval or a halt."""
+        """Run automated stages from wherever the cycle is, until approval or a halt.
+
+        Each run is a span in the cycle's trace; each stage is a span inside it.
+        """
+        with Session(self.engine, expire_on_commit=False) as session:
+            cycle = session.get(Cycle, cycle_id)
+            if not cycle.trace_id:
+                cycle.trace_id = new_trace_id()
+                session.add(cycle)
+                session.commit()
+        with (
+            span(self.engine, f"weekly cycle {cycle_id}", "cycle", cycle.workspace,
+                 trace_id=cycle.trace_id, cycle_id=cycle_id) as attrs,
+            cache_scope(f"cycle:{cycle_id}"),
+        ):  # fmt: skip
+            result = self._run(cycle_id)
+            attrs["stage"] = result.stage
+            return result
+
+    def _run(self, cycle_id: int) -> Cycle:
         while True:
             with Session(self.engine, expire_on_commit=False) as session:
                 cycle = session.get(Cycle, cycle_id)
@@ -97,6 +169,14 @@ class Orchestrator:
             session.commit()
 
         started = time.monotonic()
+        with span(self.engine, stage, "stage", workspace) as attrs:
+            status, detail, halted, state_json = self._attempt_stage(cycle, stage, workspace)
+            attrs.update(status=status, detail=detail[:300])
+        self._finish(cycle, task, stage, workspace, status, detail, halted, state_json,
+                     last_call, started)  # fmt: skip
+        return halted is None
+
+    def _attempt_stage(self, cycle: Cycle, stage: str, workspace: str):
         status, halted, state_json = "done", None, None
         try:
             budget.check(self.engine, workspace)
@@ -111,7 +191,10 @@ class Orchestrator:
             logger.exception("Cycle %s failed at %s", cycle.id, stage)
             status, detail = "failed", f"{type(exc).__name__}: {exc}"
             halted = f"{stage} failed: {detail}"
+        return status, detail, halted, state_json
 
+    def _finish(self, cycle, task, stage, workspace, status, detail, halted, state_json,
+                last_call, started) -> None:  # fmt: skip
         duration = int((time.monotonic() - started) * 1000)
         with Session(self.engine) as session:
             task = session.get(Task, task.id)
@@ -132,7 +215,6 @@ class Orchestrator:
                     row.state_json = state_json
             session.add(row)
             session.commit()
-        return halted is None
 
     def _record_runs(self, session: Session, task: Task, last_call: int, duration: int) -> None:
         """One AgentRun per agent that made LLM calls during this task."""
@@ -190,6 +272,17 @@ class Orchestrator:
             f"{len(report.claims())} cited claims from {report.brief.sources_read} sources; "
             f"{len(new)} sources not seen in the previous research"
         )
+        if self.monitors is not None:
+            # A monitor failing never halts the cycle: the inbox is extra evidence, not a step
+            # the strategy depends on.
+            try:
+                found = self.monitors(cycle.workspace)
+                detail += f"; {plural(found.stored, 'new signal')} in the inbox"
+                if found.failures:
+                    detail += f" ({plural(len(found.failures), 'monitor')} failed)"
+            except Exception as exc:  # noqa: BLE001 — budget included: the next step checks it
+                logger.exception("Monitors failed for %s", cycle.workspace)
+                detail += f"; monitors failed: {type(exc).__name__}"
         return detail, None, json.dumps({"new_sources": new, "first": previous is None})
 
     def _strategy_check(self, cycle: Cycle):
@@ -200,11 +293,34 @@ class Orchestrator:
             strategy = load_latest_strategy(workspace, self.root)
         except FileNotFoundError:
             strategy = None
+        # The weekly memory job: remember measured pieces and re-test every playbook rule.
+        miner.mine(self.engine, workspace, as_of=datetime.now(UTC))
         notes = []
-        if strategy is None or new:
+        # Signals a person sent from the inbox since the strategy was written are new evidence.
+        signals_sent = [
+            signal
+            for signal in monitor_signals.for_strategist(self.engine, workspace)
+            if strategy is not None
+            and signal.decided_at is not None
+            and _aware(signal.decided_at) > _aware(strategy.created_at)
+        ]
+        if strategy is None or new or signals_sent:
             brand = load_brain(workspace, root=self.root)
             research = load_latest_research(workspace, self.root)
-            reason = f"{len(new)} new sources" if strategy else "no strategy existed yet"
+            reason = (
+                "no strategy existed yet"
+                if strategy is None
+                else ", ".join(
+                    part
+                    for part in (
+                        f"{len(new)} new sources" if new else "",
+                        plural(len(signals_sent), "signal") + " sent from the inbox"
+                        if signals_sent
+                        else "",
+                    )
+                    if part
+                )
+            )
             strategy = self.strategist.run(StrategyInput(brand=brand, research=research), workspace)
             save_strategy(strategy, self.root)
             notes.append(f"Strategy written ({reason}); {len(strategy.issues)} open issues")
@@ -290,29 +406,10 @@ class Orchestrator:
                 records[0].final.metadata.hypothesis if records else "",
             )  # fmt: skip
         save_batch(batch, self.root)
+        version = strategy_version(workspace, self.root)
         with Session(self.engine) as session:
             for piece in batch.pieces:
-                final = piece.final
-                session.add(
-                    Draft(
-                        cycle_id=cycle.id,
-                        workspace=workspace,
-                        piece_id=piece.id,
-                        content_type=piece.request.content_type,
-                        angle=piece.angle,
-                        day=piece.day,
-                        original_text=final.text,
-                        text=final.text,
-                        body_json=json.dumps(final.body),
-                        metadata_json=final.metadata.model_dump_json(),
-                        min_score=min(final.critique.scores().values()),
-                        passed_critic=piece.passed,
-                        history_json=json.dumps(
-                            [version.model_dump(mode="json") for version in piece.versions]
-                        ),
-                        status="blocked" if piece.blocked else "pending_approval",
-                    )
-                )
+                session.add(draft_from_piece(piece, cycle.id, workspace, version))
             session.commit()
         rounds = sum(len(piece.versions) for piece in batch.pieces)
         return (
@@ -336,6 +433,15 @@ class Orchestrator:
         blocked = [piece_name(draft.piece_id) for draft in drafts if draft.status == "blocked"]
         if blocked:
             detail += f"; blocked by guardrails: {', '.join(blocked)}"
+        if self.panel is not None:
+            # The pre-test is advice for the reviewer; a failure never holds the cycle back.
+            try:
+                notes = self.panel(cycle.id)
+                if notes:
+                    detail += "; " + "; ".join(notes)
+            except Exception as exc:  # noqa: BLE001 — budget included: the reviewer is next
+                logger.exception("Panel pre-test failed for cycle %s", cycle.id)
+                detail += f"; panel pre-test failed: {type(exc).__name__}"
         return detail
 
 

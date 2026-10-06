@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { wordDiff } from "@/lib/diff";
 import { api, ApiError, useApi } from "@/lib/api";
 import { label } from "@/lib/session";
 import { Badge, Button, ErrorState, Field, inputClass, Loading, Notice, Sheet, statusTone } from "@/components/ui";
+import { AdImages, LandingPreview } from "@/components/creatives";
+import { PanelPrediction } from "@/components/panel";
 
 type Review = {
   id: number;
@@ -21,6 +24,7 @@ type Review = {
   violations: { rule: string; line: number; excerpt: string; reason: string }[];
   first_draft: string | null;
   tracking_key: string;
+  memory: { examples?: { text: string; rate_pct: number; metric: string; score: number; published_on: string }[]; rules?: string[] };
   variants: { id: number; angle: string; status: string; lowest_score: number }[];
 };
 
@@ -46,9 +50,9 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
     setBusy(true);
     setError(null);
     try {
-      const result = (await action()) as { voice_rules_learned?: string[] } | undefined;
-      const learned = result?.voice_rules_learned ?? [];
-      setNotice(learned.length ? `${done} New voice rule learned from your edits: ${learned.join("; ")}` : done);
+      const result = (await action()) as { voice_rules_proposed?: string[] } | undefined;
+      const learned = result?.voice_rules_proposed ?? [];
+      setNotice(learned.length ? `${done} Proposed as a brand voice rule, waiting in the Playbook: ${learned.join("; ")}` : done);
       setMode("view");
       setDecided(true);
       review.reload();
@@ -59,6 +63,27 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
       setBusy(false);
     }
   }
+
+  // Keyboard shortcuts on the review queue: A approve, R reject, E edit, J/K next/previous.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      if (!data || mode !== "view" || busy) return;
+      const key = event.key.toLowerCase();
+      const at = props.queue.indexOf(props.draftId);
+      if (key === "a" && data.status === "pending_approval") decide("approved");
+      else if (key === "r" && ["pending_approval", "blocked"].includes(data.status)) { setComment(""); setMode("reject"); }
+      else if (key === "e" && ["pending_approval", "blocked"].includes(data.status)) { setText(data.text); setComment(""); setMode("edit"); }
+      else if (key === "j" && at >= 0 && at < props.queue.length - 1) props.onOpen(props.queue[at + 1]);
+      else if (key === "k" && at > 0) props.onOpen(props.queue[at - 1]);
+      else return;
+      event.preventDefault();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   const decide = (decision: string, extra: object = {}) =>
     run(() => api(`/drafts/${props.draftId}/decision`, { method: "POST", body: { decision, comment, ...extra } }),
@@ -132,6 +157,7 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
             {data.edited && <Badge>Edited by you</Badge>}
             <span className="text-xs text-muted">{data.rounds} editor round{data.rounds === 1 ? "" : "s"}</span>
             {position >= 0 && props.queue.length > 1 && <span className="ml-auto text-xs font-medium text-muted">{position + 1} of {props.queue.length} to review</span>}
+            <span className="hidden w-full text-xs text-muted md:block">Keys: A approve · R reject · E edit · J/K next and previous</span>
           </div>
           {notice && <Notice tone="good">{notice}</Notice>}
           {error && <ErrorState error={error} />}
@@ -150,6 +176,8 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
             </div>
           )}
 
+          {data.variants.length > 0 && <PanelPrediction draftId={data.id} />}
+
           {data.violations.length > 0 && (
             <Notice tone="bad">
               <strong>Blocked by a guardrail.</strong> It cannot be approved as written.
@@ -162,6 +190,17 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
               <Field label="Your version">
                 <textarea className={`${inputClass} font-mono`} rows={12} value={text} onChange={(event) => setText(event.target.value)} />
               </Field>
+              {text !== data.text && (
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase text-muted">Your changes</p>
+                  <div className="whitespace-pre-wrap rounded-xl border border-line bg-bg px-4 py-3 text-[15px] leading-relaxed" aria-label="Tracked changes">
+                    {wordDiff(data.text, text).map((piece, index) =>
+                      piece.kind === "same" ? <span key={index}>{piece.text}</span>
+                      : piece.kind === "removed" ? <del key={index} className="bg-bad-soft text-bad decoration-bad/70">{piece.text}</del>
+                      : <ins key={index} className="bg-good-soft text-good no-underline">{piece.text}</ins>)}
+                  </div>
+                </div>
+              )}
               <Field label="Why the change?" hint="Optional. Recurring edits become brand voice rules.">
                 <input className={inputClass} value={comment} onChange={(event) => setComment(event.target.value)} />
               </Field>
@@ -176,6 +215,9 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
               )}
             </div>
           )}
+
+          {mode === "view" && data.content_type === "ad" && <AdImages draftId={data.id} disabled={data.status === "rejected"} />}
+          {mode === "view" && data.content_type === "landing_hero" && <LandingPreview draftId={data.id} />}
 
           {mode === "reject" && (
             <Field label="What is wrong with it?" hint="Optional, but it helps the team.">
@@ -211,6 +253,22 @@ export function ReviewPanel(props: { draftId: number; queue: number[]; onClose: 
             ))}
             <div><dt className="text-xs font-semibold uppercase text-muted">Tracking key</dt><dd className="break-all font-mono text-xs">{data.tracking_key}</dd></div>
           </dl>
+
+          {((data.memory?.examples?.length ?? 0) > 0 || (data.memory?.rules?.length ?? 0) > 0) && (
+            <details>
+              <summary className="cursor-pointer text-sm font-medium">
+                Written with {data.memory.examples?.length ?? 0} past winner{data.memory.examples?.length === 1 ? "" : "s"} and {data.memory.rules?.length ?? 0} playbook rule{data.memory.rules?.length === 1 ? "" : "s"}
+              </summary>
+              <ul className="mt-2 space-y-1.5 text-sm">
+                {data.memory.rules?.map((rule) => <li key={rule}><span className="font-medium">Rule:</span> {rule}</li>)}
+                {data.memory.examples?.map((example, index) => (
+                  <li key={index} className="text-muted">
+                    <span className="font-medium text-ink">Past winner</span> ({example.rate_pct}% {example.metric}, {example.score.toFixed(1)}x the brand average): “{example.text.split("\n")[0]}”
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
 
           {data.edits.length > 0 && (
             <details>

@@ -19,6 +19,9 @@ _OTHER = {
     "social_proof": "social proof",
     "gsc": "Search Console",
     "ga4": "GA4",
+    "keyword_gap": "content gap",
+    "new_post": "new blog post",
+    "seo": "SEO",
 }
 _PIECE = re.compile(r"^\d+-day(\d+)-(.+?)(?:-(pain|outcome|social_proof))?$")
 

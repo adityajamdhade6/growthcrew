@@ -1,0 +1,3 @@
+{"access_token": "ya29.test-access", "expires_in": 3599, "refresh_token": "1//test-refresh",
+ "scope": "https://www.googleapis.com/auth/webmasters.readonly https://www.googleapis.com/auth/analytics.readonly",
+ "token_type": "Bearer"}

@@ -21,7 +21,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #10141c;
     --surface: #181d28;
     --raised: #202634;
@@ -39,6 +39,26 @@
     --bad-soft: #3a1b19;
     --series: #3987e5;
   }
+}
+
+/* A theme picked in the app wins over the system setting. */
+:root[data-theme="dark"] {
+    --bg: #10141c;
+    --surface: #181d28;
+    --raised: #202634;
+    --ink: #e9ecf2;
+    --muted: #9aa5b8;
+    --line: #2a3142;
+    --accent: #7d95f5;
+    --accent-soft: #232c4d;
+    --on-accent: #0d1220;
+    --good: #6cd29a;
+    --good-soft: #17301f;
+    --warn: #e7c15a;
+    --warn-soft: #33290f;
+    --bad: #f2928b;
+    --bad-soft: #3a1b19;
+    --series: #3987e5;
 }
 
 @theme inline {
@@ -62,6 +82,14 @@
 
 html {
   color-scheme: light dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 body {

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, computed_field, field_validator
 
 from growthcrew.content.types import Angle, ContentRequest, Outline, PieceMetadata, SEOBrief
 from growthcrew.guardrails import Violation
+from growthcrew.memory.playbook import MemoryUsed
 from growthcrew.schemas import ApprovalStatus
 
 PASS_SCORE = 8
@@ -72,6 +73,9 @@ class PieceRecord(BaseModel):
     seo_brief: SEOBrief | None = None
     outline: Outline | None = None
     versions: list[Version] = []
+    # The past winners and playbook rules the writer was shown, and the prompt that wrote it.
+    memory: MemoryUsed = MemoryUsed()
+    prompt_version: str = ""
     # Nothing is published automatically; a human approves the final version.
     status: ApprovalStatus = ApprovalStatus.PENDING
 

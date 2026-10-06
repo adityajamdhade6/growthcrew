@@ -20,6 +20,7 @@ const GROUPS: [string, string][] = [
   ["products", "Products"],
   ["proof", "Proof"],
   ["competitors", "Competitors"],
+  ["brand_kit", "Brand kit"],
 ];
 const STEPS = [
   ["crawling", "Reading the website", "Up to 20 pages, respecting robots.txt"],

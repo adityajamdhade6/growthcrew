@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { api, ApiError, useApi } from "@/lib/api";
 import { label, useSession } from "@/lib/session";
+import { PanelAccuracy } from "@/components/panel";
 import { Badge, Button, Card, Empty, ErrorState, Loading, Notice, PageHeader, SectionTitle, statusTone, Tabs } from "@/components/ui";
 
 type Row = { id: string; dimension: string; value: string; metric: string; pieces: number; trials: number; successes: number; rate_pct: number };
@@ -190,6 +191,10 @@ export default function Results() {
           )}
         </div>
       )}
+
+      <div className="mt-8">
+        <PanelAccuracy workspace={workspace} />
+      </div>
 
       <div className="mt-8">
         <SectionTitle>Learning log: how the strategy changed, and why</SectionTitle>

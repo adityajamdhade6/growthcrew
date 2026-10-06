@@ -1,0 +1,9 @@
+{"dimensionHeaders": [{"name": "date"}, {"name": "sessionManualAdContent"}, {"name": "landingPage"}],
+ "metricHeaders": [{"name": "sessions", "type": "TYPE_INTEGER"}, {"name": "keyEvents", "type": "TYPE_FLOAT"}],
+ "rows": [
+  {"dimensionValues": [{"value": "20261001"}, {"value": "gc-1-01-day01-linkedin_post"}, {"value": "/pricing"}],
+   "metricValues": [{"value": "42"}, {"value": "3"}]},
+  {"dimensionValues": [{"value": "20261001"}, {"value": "(not set)"}, {"value": "(not set)"}],
+   "metricValues": [{"value": "500"}, {"value": "1"}]}
+ ],
+ "rowCount": 2, "metadata": {"currencyCode": "USD", "timeZone": "Europe/London"}, "kind": "analyticsData#runReport"}

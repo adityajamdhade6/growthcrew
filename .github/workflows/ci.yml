@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   python:
     runs-on: ubuntu-latest
@@ -13,15 +17,63 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
       - run: make lint
+      - name: Chromium for the creative rendering tests
+        run: uv run playwright install --with-deps chromium
       - name: Tests (fails below 85% coverage)
+        env:
+          # The rendering tests must run here, not be skipped.
+          GROWTHCREW_REQUIRE_BROWSER: "1"
         run: uv run pytest -q --cov=growthcrew --cov-report=term
       - name: Offline evals
         run: make eval
+      - name: Eval gate (blocks red-team failures and metric regressions)
+        if: always()
+        run: uv run python -m evals.gate
+      - name: Post the scorecard on the pull request
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'evals/results/pr_comment.md';
+            if (!fs.existsSync(path)) return;
+            const body = fs.readFileSync(path, 'utf8') + '\n<!-- growthcrew-scorecard -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const mine = comments.find(c => c.body.includes('<!-- growthcrew-scorecard -->'));
+            if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            else await github.rest.issues.createComment({ owner, repo, issue_number, body });
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: scorecard
-          path: evals/results/scorecard.*
+          path: |
+            evals/results/scorecard.*
+            evals/results/pr_comment.md
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: growthcrew
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s
+          --health-retries 10
+    env:
+      GROWTHCREW_TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/growthcrew
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: Migrations and pgvector memory search on Postgres
+        run: uv run pytest -q tests/test_backbone.py -k "postgres or migrations"
+      - name: Load test, 20 workspaces at once (simulated agents)
+        run: uv run python -m evals.loadtest --workspaces 20 --workers 6 --database-url "$GROWTHCREW_TEST_POSTGRES_URL"
 
   web:
     runs-on: ubuntu-latest

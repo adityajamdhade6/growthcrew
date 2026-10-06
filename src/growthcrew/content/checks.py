@@ -19,7 +19,14 @@ AI_CLICHES: tuple[str, ...] = (
 
 _STAT = re.compile(
     r"[$€£₹]\s?\d[\d,.]*\s?(?:k|m|bn|million|billion)?\b"
-    r"|\d[\d,.]*\s?(?:%|percent\b|x\b|k\b|million\b|billion\b)",
+    r"|\d[\d,.]*\s?(?:%|percent\b|x\b|k\b|million\b|billion\b)"
+    # Ratings ("4.9 stars", "4.9/5", "4.9 out of 5").
+    r"|\b\d(?:\.\d)?\s?(?:stars?\b|/\s?5\b|out of 5\b)"
+    # Head-counts of people or reviews ("12,000 happy sleepers", "500+ clients").
+    r"|\b\d{1,3}(?:,\d{3})+\+?(?=\s+(?:\w+\s+){0,2}(?:customers|clients|users|people|buyers|"
+    r"sleepers|members|subscribers|businesses|companies|reviews|orders|families|homes)\b)"
+    r"|\b\d{3,}\+(?=\s+(?:\w+\s+){0,2}(?:customers|clients|users|people|buyers|members|"
+    r"subscribers|businesses|companies|reviews|orders|families|homes)\b)",
     re.IGNORECASE,
 )
 _QUOTED = re.compile(r"[\"“]([^\"”]{25,})[\"”]")

@@ -91,6 +91,40 @@ class Competitor(BaseModel):
     url: str = ""
 
 
+HEX = r"^#[0-9a-fA-F]{6}$"
+
+
+class BrandColors(BaseModel):
+    """Hex colours, e.g. "#1f3a5f". Text and background are checked for contrast in code."""
+
+    primary: str = Field("", pattern=rf"{HEX}|^$")
+    secondary: str = Field("", pattern=rf"{HEX}|^$")
+    background: str = Field("", pattern=rf"{HEX}|^$")
+    text: str = Field("", pattern=rf"{HEX}|^$")
+    accent: str = Field("", pattern=rf"{HEX}|^$")
+
+
+class BrandImage(BaseModel):
+    """A product or lifestyle photo the owner added, with a description for alt text."""
+
+    file: str
+    alt: str = ""
+
+
+class BrandKit(BaseModel):
+    """How the brand looks. Images are files a person added under workspaces/<brand>/brand/."""
+
+    # File names inside workspaces/<brand>/brand/, never URLs: rendering makes no network calls.
+    logo_file: str = ""
+    product_images: list[BrandImage] = []
+    colors: BrandColors = BrandColors()
+    heading_font: str = ""
+    body_font: str = ""
+    image_style_rules: list[str] = []
+    do_examples: list[str] = []
+    dont_examples: list[str] = []
+
+
 class FieldMeta(BaseModel):
     status: Status = "inferred"
     confidence: Confidence = "low"
@@ -110,6 +144,7 @@ class Brain(BaseModel):
     products: list[Product] = []
     proof: Proof = Proof()
     competitors: list[Competitor] = []
+    brand_kit: BrandKit = BrandKit()
     # Keyed by the paths in FIELD_PATHS.
     fields: dict[str, FieldMeta] = {}
 
@@ -125,6 +160,8 @@ class Brain(BaseModel):
             return not self.voice.example_passages and not self.voice.guide.rules
         if path == "voice.guide":
             return not value.rules
+        if path == "brand_kit":
+            return value == BrandKit()
         return value in ("", [], "unknown")
 
     def weakest(self) -> list[tuple[str, str]]:
@@ -161,4 +198,5 @@ FIELD_PATHS: tuple[str, ...] = (
     "proof.testimonials",
     "proof.stats",
     "competitors",
+    "brand_kit",
 )

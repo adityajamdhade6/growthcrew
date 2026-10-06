@@ -16,6 +16,8 @@ class LLMCall(SQLModel, table=True):
     workspace: str | None = Field(default=None, index=True)
     # What the call was for, e.g. "linkedin_post|01-day02-linkedin_post". Prices each piece.
     tag: str | None = Field(default=None, index=True)
+    # Short hash of the system prompt, so results can be compared across prompt changes.
+    prompt_version: str = ""
     # The model that served the response, which differs from the requested
     # model when a refusal fallback ran.
     model: str
@@ -29,6 +31,11 @@ class LLMCall(SQLModel, table=True):
     stop_reason: str | None = None
     success: bool = True
     error: str | None = None
+    # The trace and span this call belongs to, when it ran inside a traced cycle.
+    trace_id: str = Field(default="", index=True)
+    span_id: str = ""
+    # True when the response came from the cache of a resumed job: no tokens were paid for.
+    cached: bool = False
 
 
 class BrainVersion(SQLModel, table=True):
@@ -64,6 +71,8 @@ class Cycle(SQLModel, table=True):
     """One weekly cycle for a workspace. `stage` is the state machine's current state."""
 
     id: int | None = Field(default=None, primary_key=True)
+    # Every stage, model call and tool call of this cycle is a span in this trace.
+    trace_id: str = ""
     workspace: str = Field(index=True)
     week_start: datetime
     stage: str = "research"
@@ -121,6 +130,11 @@ class Draft(SQLModel, table=True):
     passed_critic: bool
     # Every version with its critique, as JSON, for the review panel.
     history_json: str = "[]"
+    # Which writer prompt and which strategy produced this draft.
+    prompt_version: str = ""
+    strategy_version: int = 0
+    # The past winners and playbook rules the writer was given, as JSON.
+    memory_json: str = "{}"
     # pending_approval, approved, rejected
     status: str = Field(default="pending_approval", index=True)
     created_at: datetime = Field(default_factory=_now)
@@ -158,6 +172,8 @@ class CalendarItem(SQLModel, table=True):
     published_by: str | None = None
     # Where it went live; used to match analytics rows back to the piece.
     published_url: str | None = None
+    # The id an integration gave it when it published (e.g. a Brevo campaign id), for stats.
+    external_id: str | None = None
     metrics_json: str = ""
 
 
@@ -169,6 +185,9 @@ class EditPattern(SQLModel, table=True):
     key: str
     rule: str
     count: int = 0
+    # counting, proposed (waiting for a person), accepted (written into the voice guide),
+    # rejected
+    status: str = "counting"
     # True once the rule has been written into the brand voice guide.
     applied: bool = False
 
@@ -256,10 +275,23 @@ class User(SQLModel, table=True):
     password_hash: str
     # Comma-separated workspace names, or "*" for every workspace (admin).
     workspaces: str = ""
+    # Role per workspace as JSON, {"acme": "approver"}: owner, approver or viewer. A workspace
+    # listed above with no role here is owned.
+    roles: str = "{}"
     created_at: datetime = Field(default_factory=_now)
 
     def can_access(self, workspace: str) -> bool:
         return self.is_admin or workspace in self.workspaces.split(",")
+
+    def role_in(self, workspace: str) -> str | None:
+        """owner, approver or viewer in this workspace; None without access."""
+        if self.is_admin:
+            return "owner"
+        if not self.can_access(workspace):
+            return None
+        import json
+
+        return json.loads(self.roles or "{}").get(workspace, "owner")
 
     @property
     def is_admin(self) -> bool:
@@ -311,3 +343,338 @@ class ExperimentRegistration(SQLModel, table=True):
     data: str
     # The readout from the first judgement at the planned sample. Once set, it is the answer.
     verdict: str | None = None
+
+
+class MemoryPiece(SQLModel, table=True):
+    """A published piece with its final performance: the brand's long-term content memory."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    draft_id: int = Field(index=True, unique=True)
+    content_type: str = Field(index=True)
+    published_on: datetime
+    text: str
+    pillar: str = ""
+    angle: str | None = None
+    persona: str = ""
+    hypothesis: str = ""
+    metric: str
+    trials: int
+    successes: int
+    rate: float
+    # This piece's rate divided by the average for its content type in the workspace.
+    score: float = 1.0
+    # Features of the text the pattern miner looks at, as JSON {name: bool}.
+    features: str = "{}"
+    # The text's embedding, as a JSON list of floats.
+    embedding: str = "[]"
+    prompt_version: str = ""
+    strategy_version: int = 0
+
+
+class PlaybookRule(SQLModel, table=True):
+    """A pattern the miner found in this brand's own results."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    content_type: str
+    feature: str
+    statement: str
+    # candidate, active, weakening, retired
+    status: str = "candidate"
+    lift_pct: float = 0.0
+    probability: float = 0.0
+    pieces_with: int = 0
+    pieces_without: int = 0
+    found_on: datetime
+    updated_on: datetime
+    # Consecutive runs in which the evidence held, or failed to.
+    held_runs: int = 0
+    failed_runs: int = 0
+
+
+class RuleEvent(SQLModel, table=True):
+    """One entry in a rule's history: what the miner saw on one run."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    rule_id: int = Field(index=True)
+    at: datetime
+    status: str
+    lift_pct: float
+    probability: float
+    pieces_with: int
+    pieces_without: int
+    note: str = ""
+
+
+class PageSnapshot(SQLModel, table=True):
+    """The readable text of a monitored page on one date, for week-to-week diffs."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    competitor: str = ""
+    url: str = Field(index=True)
+    # home, pricing, blog, or forum
+    kind: str
+    fetched_at: datetime = Field(default_factory=_now)
+    text: str
+    # Links found on the page, as a JSON list; used to spot new blog posts.
+    links: str = "[]"
+    digest: str = ""
+
+
+class SeenItem(SQLModel, table=True):
+    """Something a monitor has already reported (an ad, a post), so it is not reported twice."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    kind: str
+    key: str = Field(index=True)
+    first_seen: datetime = Field(default_factory=_now)
+
+
+class KeywordRank(SQLModel, table=True):
+    """One row of a Search Console export: a query's position on a date."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    keyword: str = Field(index=True)
+    page: str = ""
+    date: datetime
+    position: float
+    clicks: float = 0
+    impressions: float = 0
+
+
+class Signal(SQLModel, table=True):
+    """One finding from the always-on monitors, waiting in the Signals inbox."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=_now, index=True)
+    workspace: str = Field(index=True)
+    # competitor, seo, social
+    monitor: str
+    # price_change, positioning, copy_tweak, new_post, new_ads, keyword_gap, ranking_move,
+    # pain, question, language, spike
+    category: str = Field(index=True)
+    title: str
+    summary: str
+    suggested_response: str = ""
+    # [{"url": ..., "date": ...}], every source the finding rests on
+    sources: str = "[]"
+    # How much the finding matters before anyone has reacted to it, 0 to 1, set in code.
+    base_importance: float = 0.5
+    # Text in the source that looked like instructions to a model, if any.
+    warning: str = ""
+    # new, sent (to the strategist), dismissed
+    status: str = Field(default="new", index=True)
+    decided_by: str = ""
+    decided_at: datetime | None = None
+    fingerprint: str = Field(default="", index=True)
+    embedding: str = "[]"
+
+
+class Creative(SQLModel, table=True):
+    """One rendered size of an ad image in one round of the vision critic's loop."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=_now)
+    workspace: str = Field(index=True)
+    draft_id: int = Field(index=True)
+    # A hash of the draft text the image was made from; differs once the text is edited.
+    text_hash: str = ""
+    # square, portrait, story
+    size: str
+    round: int
+    # Under workspaces/<brand>/creative/<draft_id>/
+    path: str
+    # The slots the model filled, as JSON: headline, subcopy, cta, alt_text, text_scale.
+    slots: str
+    # The vision critic's scores and fixes, and the checks measured in code, as JSON.
+    scores: str = "{}"
+    fixes: str = "[]"
+    checks: str = "[]"
+    passed: bool = False
+    # True when any image on it was made by an image-generation model.
+    ai_generated: bool = False
+    # Model, prompt and date of a generated image, as JSON.
+    image_meta: str = "{}"
+
+
+class Persona(SQLModel, table=True):
+    """A synthetic respondent built from the ideal customer and voice-of-customer research."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    created_at: datetime = Field(default_factory=_now)
+    # Personas are made in generations; a new one replaces the last when research changes.
+    generation: int = Field(index=True)
+    name: str
+    # summary, segment, demographics, pains, objections, media_habits, phrases, as JSON.
+    profile: str
+    # The evidence IDs (brain:..., voc:N, claim:N) the persona rests on, as JSON.
+    support: str = "[]"
+
+
+class PanelRun(SQLModel, table=True):
+    """One pre-test of an experiment's variants by the synthetic panel, before launch."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=_now)
+    workspace: str = Field(index=True)
+    cycle_id: int = Field(index=True)
+    # The experiment's base piece id, as registered, e.g. "07-day03-ad".
+    experiment: str = Field(index=True)
+    generation: int = 0
+    # Every persona's reactions, the predicted ranking with its uncertainty, and the advice.
+    responses: str = "[]"
+    prediction: str = "{}"
+    recommendation: str = "{}"
+    # untested, low, useful: how far the panel's past predictions matched real results.
+    trust: str = "untested"
+
+
+class ConnectorCredential(SQLModel, table=True):
+    """One workspace's connection to a data source. The secret part is encrypted at rest."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    # google, brevo, hubspot, mcp
+    provider: str = Field(index=True)
+    # Tokens and keys, encrypted with keys.encrypt. Never returned by the API.
+    secret: str = ""
+    # Non-secret settings as JSON: site URL, GA4 property, list id, sender, MCP server.
+    settings: str = "{}"
+    scopes: str = ""
+    connected_by: str = ""
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class SyncRun(SQLModel, table=True):
+    """One scheduled or manual pull from one connector."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    provider: str
+    started_at: datetime = Field(default_factory=_now, index=True)
+    finished_at: datetime | None = None
+    rows: int = 0
+    matched: int = 0
+    # ok, failed
+    status: str = "running"
+    error: str = ""
+
+
+class CrmSnapshot(SQLModel, table=True):
+    """Leads and pipeline from the CRM on one day."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    taken_at: datetime = Field(default_factory=_now, index=True)
+    source: str = "hubspot"
+    new_contacts: int = 0
+    open_deals: int = 0
+    pipeline_value: float = 0.0
+    won_deals: int = 0
+    won_value: float = 0.0
+    # New contacts by original source (organic search, social, email...), as JSON.
+    contacts_by_source: str = "{}"
+
+
+class ApprovalTokenUse(SQLModel, table=True):
+    """An MCP approval token that has been spent. Each token works once."""
+
+    nonce: str = Field(primary_key=True)
+    used_at: datetime = Field(default_factory=_now)
+    workspace: str
+    action: str
+    approved_by: str
+
+
+class Span(SQLModel, table=True):
+    """One timed step in a trace: a weekly cycle, a stage, an agent's model call or a tool call."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    trace_id: str = Field(index=True)
+    span_id: str = Field(index=True)
+    parent_id: str = ""
+    name: str
+    # cycle, stage, llm, tool
+    kind: str
+    workspace: str = Field(default="", index=True)
+    started_at: datetime = Field(default_factory=_now)
+    ended_at: datetime | None = None
+    duration_ms: int = 0
+    # ok, error
+    status: str = "ok"
+    # Tokens, cost, model, stage detail, as JSON.
+    attributes: str = "{}"
+
+
+class Job(SQLModel, table=True):
+    """Durable background work: claimed with a lease, retried with backoff, resumable."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    kind: str = Field(index=True)
+    workspace: str = Field(default="", index=True)
+    payload: str = "{}"
+    # Enqueuing the same key twice returns the first job: re-sending is safe.
+    idempotency_key: str = Field(unique=True, index=True)
+    # queued, running, done, dead
+    status: str = Field(default="queued", index=True)
+    attempts: int = 0
+    max_attempts: int = 5
+    run_after: datetime = Field(default_factory=_now, index=True)
+    lease_until: datetime | None = Field(default=None, index=True)
+    worker: str = ""
+    last_error: str = ""
+    result: str = ""
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class LLMCache(SQLModel, table=True):
+    """A model response kept by the hash of its request, so a resumed job does not pay twice."""
+
+    key: str = Field(primary_key=True)
+    namespace: str = Field(index=True)
+    created_at: datetime = Field(default_factory=_now)
+    response: str
+
+
+class AuditLog(SQLModel, table=True):
+    """Append-only record of every approval, edit, publish and access change.
+
+    Each row carries the hash of the one before it, so a removed or altered row breaks the
+    chain; the database refuses updates and deletes on this table.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    at: datetime = Field(default_factory=_now, index=True)
+    workspace: str = Field(default="", index=True)
+    actor: str
+    action: str = Field(index=True)
+    target: str = ""
+    detail: str = "{}"
+    prev_hash: str = ""
+    hash: str = ""
+
+
+class SystemFlag(SQLModel, table=True):
+    """Switches set by a person, such as the kill switch that pauses all agents."""
+
+    key: str = Field(primary_key=True)
+    value: str
+    set_by: str
+    set_at: datetime = Field(default_factory=_now)
+
+
+class ChannelIdentity(SQLModel, table=True):
+    """Who a Slack user is in GrowthCrew, so a button press is a named person's decision."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    channel: str = "slack"
+    external_id: str = Field(index=True)
+    user_id: int

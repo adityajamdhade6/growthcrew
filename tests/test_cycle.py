@@ -164,6 +164,50 @@ def test_strategy_changes_only_when_research_finds_new_sources(setup, engine):
     assert stubs.strategies == 2
 
 
+def test_cycle_runs_the_monitors_and_a_sent_signal_rewrites_the_strategy(setup, engine):
+    from growthcrew.monitor import signals
+    from growthcrew.monitor.run import MonitorRun
+
+    orchestrator, stubs = setup
+    calls = []
+
+    def monitors(workspace):
+        calls.append(workspace)
+        found = signals.Finding(monitor="competitor", category="price_change",
+                                title="Rival cut prices", summary="From $49 to $39",
+                                sources=[signals.Source(url="https://rival.test/p",
+                                                        date="2026-10-01")])  # fmt: skip
+        stored, _ = signals.file_findings(engine, workspace, [found])
+        return MonitorRun(workspace=workspace, found={"competitor": 1}, stored=len(stored),
+                          duplicates=0, failures=[], digest_path="")  # fmt: skip
+
+    orchestrator.monitors = monitors
+    cycle = run_cycle(orchestrator)
+    assert calls == ["acme"] and stubs.strategies == 1
+    research = timeline(engine, cycle.id)["steps"][0]["detail"]
+    assert research.endswith("1 new signal in the inbox")
+
+    run_cycle(orchestrator)
+    assert stubs.strategies == 1  # nothing sent yet, nothing new
+    [item] = signals.inbox(engine, "acme")
+    signals.decide(engine, "acme", item["id"], "send", "owner@acme.test")
+    third = run_cycle(orchestrator)
+    assert stubs.strategies == 2
+    detail = timeline(engine, third.id)["steps"][1]["detail"]
+    assert "1 signal sent from the inbox" in detail
+
+
+def test_a_failing_monitor_does_not_halt_the_cycle(setup):
+    orchestrator, _ = setup
+
+    def broken(workspace):
+        raise RuntimeError("site down")
+
+    orchestrator.monitors = broken
+    cycle = run_cycle(orchestrator)
+    assert cycle.stage == "awaiting_approval"
+
+
 def test_running_again_does_not_pass_the_approval_stage(setup):
     orchestrator, _ = setup
     cycle = run_cycle(orchestrator)
@@ -289,32 +333,44 @@ def test_budget_endpoints(client):
 # --- learning from edits ---
 
 
-def test_edits_store_a_diff_and_recurring_edits_become_voice_rules(setup, engine, tmp_path):
+def test_edits_store_a_diff_and_recurring_edits_are_proposed_not_applied(setup, engine, tmp_path):
+    from growthcrew.brain import learning
+    from growthcrew.db.models import Draft
+
     orchestrator, _ = setup
-    learned_each_time = []
+    proposed_each_time = []
     for _ in range(3):
         cycle = run_cycle(orchestrator)
         with Session(engine) as session:
-            from growthcrew.db.models import Draft
-
             draft = session.exec(
                 select(Draft).where(
                     Draft.cycle_id == cycle.id, Draft.content_type == "linkedin_post"
                 )
             ).one()
         edited = draft.text.replace("!", ".")
-        approval, learned = workflow.decide(
+        approval, proposed = workflow.decide(
             engine, draft.id, "edited", "adi", "Too shouty", edited, root=tmp_path
         )
-        learned_each_time.append(learned)
+        proposed_each_time.append(proposed)
 
     assert "-Great bread! Really great!" in approval.diff
     assert "+Great bread. Really great." in approval.diff
-    assert learned_each_time == [[], [], ["Do not use exclamation marks."]]
+    assert proposed_each_time == [[], [], ["Do not use exclamation marks."]]
 
+    # The third identical edit proposes a rule. Nothing changes until a person accepts it.
+    assert load_brain("acme", root=tmp_path).version == 1
+    [proposal] = learning.proposals(engine, "acme")
+    assert (proposal["rule"], proposal["times_seen"]) == ("Do not use exclamation marks.", 3)
+
+    assert (
+        learning.resolve_proposal(engine, "acme", proposal["id"], True, root=tmp_path) == "accepted"
+    )
     brain = load_brain("acme", root=tmp_path)
-    assert brain.version == 2
-    assert "Do not use exclamation marks." in brain.voice.guide.rules
+    assert brain.version == 2 and "Do not use exclamation marks." in brain.voice.guide.rules
+    assert learning.proposals(engine, "acme") == []
+    with pytest.raises(LookupError):
+        learning.resolve_proposal(engine, "acme", proposal["id"], True, root=tmp_path)
+
     with Session(engine) as session:
         [item] = session.exec(select(CalendarItem).where(CalendarItem.cycle_id == cycle.id)).all()
         draft = session.get(Draft, item.draft_id)

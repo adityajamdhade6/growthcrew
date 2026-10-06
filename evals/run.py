@@ -30,9 +30,11 @@ def run(live: bool, limit: int | None) -> tuple[list[EvalResult], float | None]:
         suites.analyst_end_to_end(),
         suites.guardrail_cases(),
         suites.strategy_completeness_saved(),
+        suites.red_team(),
     ]
     if not live:
         results.append(suites.calibration_status())
+        results.append(suites.pairwise_calibration_status())
         for name, agent in (
             ("strategy", "strategist"),
             ("content", "content"),
@@ -68,6 +70,8 @@ def run(live: bool, limit: int | None) -> tuple[list[EvalResult], float | None]:
         strategy_result,
         suites.live_content(llm, root, strategies, limit),
         suites.live_judge_calibration(llm),
+        suites.live_pairwise_calibration(llm),
+        suites.live_pairwise_content(llm, RESULTS / "last_content.json"),
         suites.live_research(llm),
     ]
     with Session(engine) as session:

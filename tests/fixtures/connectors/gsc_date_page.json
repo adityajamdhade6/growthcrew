@@ -1,0 +1,4 @@
+{"rows": [
+  {"keys": ["2026-10-01", "https://acme.test/blog/starter"], "clicks": 12, "impressions": 340, "ctr": 0.0353, "position": 4.2},
+  {"keys": ["2026-10-02", "https://acme.test/unknown-page"], "clicks": 1, "impressions": 90, "ctr": 0.011, "position": 18.0}
+], "responseAggregationType": "byPage"}

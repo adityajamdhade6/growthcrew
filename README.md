@@ -8,10 +8,11 @@ Five agents research the market, set the strategy, write the content, edit it an
 results. You approve, edit or reject each draft, usually from your phone. Each week the
 analyst proposes changes, the strategist rules on them, and next week's plan shifts.
 
-> **Status, plainly.** The system is built and tested (111 tests, 95% coverage, offline evals
-> passing). It has **not yet run against the live model or for a real business**: every
-> screenshot here uses a sample brand with invented data. The pilot and cost sections below
-> say what will be measured, and are empty until it is.
+> **Status, plainly.** The system is built and tested (255 tests, 91% coverage, offline evals
+> and all 39 red-team attacks passing, a 20-workspace load test on Postgres with no
+> cross-tenant writes). It has **not yet run against the live model or for a real business**:
+> every screenshot uses a sample brand with invented data. Pilot results and cost per piece
+> are **not yet measured**.
 
 ## The problem
 
@@ -43,9 +44,33 @@ flowchart LR
     S -->|accepted changes| C
 ```
 
+It also remembers. Every measured piece goes into a content memory; a weekly job looks for
+patterns that keep holding and retires the ones that stop; and the writer is shown the brand's
+own past winners before each draft. Retrieval uses a lexical embedder (it matches shared wording and
+topic vocabulary, not meaning); pgvector storage is in place for a model-backed embedder.
+
 **The loop that matters** is the bottom one: results come back, the analyst proposes three
 changes, the strategist accepts or rejects each with a reason, and accepted changes alter next
 week's content plan. Every ruling is kept in a learning log.
+
+## What v2 adds
+
+- **Always-on research**: competitor page diffs, Search Console gaps, social listening, and a
+  Signals inbox a person sends findings from. Every finding cites a URL and a date.
+- **Visual creative**: brand-kit templates rendered in three sizes by a sandboxed Chromium,
+  measured accessibility checks that cap a vision critic, landing page variants.
+- **Synthetic audience panel**: evidence-backed personas that may suggest dropping a weak
+  variant, never pick a winner, and stay silent until calibrated against real verdicts.
+- **Live data and MCP**: encrypted read-only connectors (Search Console, GA4, Brevo, HubSpot),
+  and GrowthCrew served as an MCP server whose only write needs a single-use human token.
+- **Evals v2**: a 75-request golden set, a position-swapped pairwise judge, 39 red-team
+  attacks, per-cycle tracing and a CI gate against a baseline.
+- **Production backbone**: Postgres + pgvector, a durable job queue, tenant scoping, roles,
+  a hash-chained audit log and a kill switch.
+- **Product UX**: approve from Slack or a signed, single-use email link; live mission stream
+  and week replay; keyboard review with tracked changes; a read-only demo login.
+- **MixLab connection**: the strategist checks its budget split against a marketing-mix
+  model's interval and sends final test verdicts back as calibration (demo is synthetic).
 
 ## What it refuses to do
 
@@ -70,12 +95,15 @@ From `make eval` (offline; no API key). Full output in `evals/results/scorecard.
 | Experiment engine: false winners between identical variants | 4.4% at worst across five scenarios, 2,000 simulated tests each |
 | Experiment engine: right winner at the planned sample | 76 to 78% of 1,000 tests; wrong winner in none |
 | Experiment engine: calls a winner on a tiny sample | 0 of 200 |
+| Pattern miner, 12 simulated weeks x 20 seeds | Real pattern active at week 12 in 20 of 20; the one that stopped holding was out of use in 20 of 20 (retired in 19) |
 | Bandit against an even budget split | 61% fewer clicks given up over 8 simulated weeks |
 | Analyst: simulated weeks, end to end through CSV ingest | 10 of 10 correct |
 | Guardrails: labelled cases | 28 of 28 (every must-block line blocked, no false blocks) |
-| Golden set (3 brands x 10 requests) | Built; 0 of 30 human reference outputs written yet |
+| Golden set (3 brands x 25 requests, 21 hard cases) | Built; 0 of 75 human reference outputs written yet |
 | Judge calibration against 20 human scores | Pieces ready; 0 of 20 human scores yet |
 | Strategy, content and research evals | Written; need the live model (`make eval-live`) |
+| Red team (prompt injection, invented proof, defamation, auto-publish, budget) | 39 of 39 attacks fail as they should |
+| Load test: 20 workspaces, 6 workers, Postgres, simulated model | 20 of 20 cycles in 13.8 s, 0 dead jobs, 0 cross-tenant drafts |
 
 ## Pilot results
 
@@ -133,26 +161,20 @@ demo with a spending cap; it has not been deployed.
 
 - **Unproven in the wild.** No live model run and no real business yet. Prompts that pass with
   a scripted test model may need work with the real one.
-- **Publishing is manual.** You copy the approved text, post it, and mark it published. No
-  platform integrations yet.
-- **Results come from CSV uploads.** No analytics APIs, and export column names were mapped
-  from memory, not from real files.
-- **Guardrails are pattern rules.** They catch listed phrasings of health, finance and
-  defamatory claims, not every rewording.
-- **The judge is uncalibrated** until 20 human scores exist, and uses the same model as the
-  agents by default.
-- **Text only.** No images, video or design for ads and social.
-- **One process, SQLite.** Background work runs inside the API process; fine for a pilot, not
-  for scale.
+- **Publishing is mostly manual.** Approved Brevo newsletters can be sent; social posts are
+  copied and marked published by a person.
+- **Connectors are tested on recorded fixtures**, not yet against a real client account.
+- **Guardrails are pattern rules.** They catch listed phrasings, not every rewording.
+- **The judge and the panel are uncalibrated** until human scores and final verdicts exist.
+- **Lexical memory search.** Past pieces are matched on shared wording, not meaning.
+- **One look per test.** The experiment engine cannot stop a test early; see the roadmap.
+- **The load test simulates the model**, so it measures the backbone, not model latency.
+- **The usability test is scripted but not run** ([docs/usability_test.md](docs/usability_test.md)).
 
 ## Roadmap
 
-1. Run every agent against the live model; fix what breaks; record real cost per piece.
-2. A 60-day pilot with one real business, baseline first.
-3. Human reference outputs and judge calibration, so content evals mean something.
-4. One real publishing integration behind the existing explicit-publish step.
-5. Analytics APIs in place of CSV uploads.
-6. A job queue and Postgres.
+See [docs/roadmap.md](docs/roadmap.md). Next: run every agent against the live model, a real
+60-day pilot, a model-backed embedder on pgvector, and sequential stopping for low-traffic tests.
 
 ## Repo map
 
@@ -165,4 +187,6 @@ demo with a spending cap; it has not been deployed.
 | `src/growthcrew/guardrails.py`, `workflow.py`, `budget.py` | What is blocked, who approves, what it may spend |
 | `evals/` | Golden set, judge, eval suites, scorecard runner |
 | `web/` | Next.js app: onboarding, mission control, strategy, calendar, results, settings |
-| `docs/` | [Case study](docs/case_study.md), [launch copy](docs/launch.md), [self-review](docs/review.md) |
+| `src/growthcrew/monitor/`, `creative/`, `panel/`, `connectors/` | Always-on research, visual creative, synthetic panel, live data |
+| `jobs.py`, `tenancy.py`, `audit.py`, `approvals.py` | Queue, tenant scoping, audit log, Slack and email approvals |
+| `docs/` | [Case study v2](docs/case_study_v2.md), [blog post](docs/blog_post.md), [MixLab](docs/mixlab.md), [operations](docs/operations.md), [Architecture](docs/architecture.md), [experiments](docs/experiments.md), [roadmap](docs/roadmap.md), [case study](docs/case_study.md), [launch copy](docs/launch.md), [self-review](docs/review.md) |

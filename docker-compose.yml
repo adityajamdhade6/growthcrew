@@ -1,24 +1,65 @@
 # One command: docker compose up --build
 # Then open http://localhost:3000 and sign in with the demo login shown on the page.
 #
+# Postgres with pgvector, the API, a worker that runs queued jobs (weekly cycles, monitors,
+# syncs; a crashed job is resumed by the next worker), the scheduler, and the web app.
 # With no ANTHROPIC_API_KEY the app runs on the sample brand and every model action returns
 # a clear "no key configured" message. Add a key to .env to run the agents for real.
+x-app: &app
+  build: .
+  environment: &env
+    DATABASE_URL: postgresql://growthcrew:growthcrew@postgres:5432/growthcrew
+    GROWTHCREW_MIGRATIONS: alembic
+    GROWTHCREW_QUEUE: "1"
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    SEARCH_API_KEY: ${SEARCH_API_KEY:-}
+    GROWTHCREW_WEEKLY_BUDGET_USD: ${GROWTHCREW_WEEKLY_BUDGET_USD:-25}
+    GROWTHCREW_TOTAL_BUDGET_USD: ${GROWTHCREW_TOTAL_BUDGET_USD:-50}
+    GROWTHCREW_SECRET: ${GROWTHCREW_SECRET:-change-me-in-production}
+    GROWTHCREW_ENCRYPTION_KEY: ${GROWTHCREW_ENCRYPTION_KEY:-}
+    SENTRY_DSN: ${SENTRY_DSN:-}
+  volumes:
+    - growthcrew-data:/data
+  depends_on:
+    postgres:
+      condition: service_healthy
+
 services:
-  api:
-    build: .
+  postgres:
+    image: pgvector/pgvector:pg16
     environment:
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      SEARCH_API_KEY: ${SEARCH_API_KEY:-}
+      POSTGRES_USER: growthcrew
+      POSTGRES_PASSWORD: growthcrew
+      POSTGRES_DB: growthcrew
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U growthcrew"]
+      interval: 5s
+      retries: 10
+
+  api:
+    <<: *app
+    environment:
+      <<: *env
       # Load the sample brand and demo login on first start. Set to 0 to start empty.
       GROWTHCREW_DEMO: ${GROWTHCREW_DEMO:-1}
-      # Spending caps: per workspace per week, and for the whole installation.
-      GROWTHCREW_WEEKLY_BUDGET_USD: ${GROWTHCREW_WEEKLY_BUDGET_USD:-25}
-      GROWTHCREW_TOTAL_BUDGET_USD: ${GROWTHCREW_TOTAL_BUDGET_USD:-50}
-      GROWTHCREW_SECRET: ${GROWTHCREW_SECRET:-}
-    volumes:
-      - growthcrew-data:/data
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      retries: 5
+
+  worker:
+    <<: *app
+    command: ["growthcrew", "worker"]
+    deploy:
+      replicas: 2
+
+  scheduler:
+    <<: *app
+    command: ["growthcrew", "scheduler", "--loop", "--analyse"]
 
   web:
     build:
@@ -34,3 +75,4 @@ services:
 
 volumes:
   growthcrew-data:
+  postgres-data:

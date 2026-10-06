@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: {{ kit.background }};
+    --text: {{ kit.text }};
+    --primary: {{ kit.primary }};
+    --cta-text: {{ kit.cta_text }};
+    --accent: {{ kit.accent }};
+  }
+  html, body { margin: 0; width: {{ width }}px; height: {{ height }}px; overflow: hidden; background: var(--bg); }
+  .canvas {
+    position: relative; box-sizing: border-box; width: {{ width }}px; height: {{ height }}px;
+    padding: {{ pad_top }}px 80px {{ pad_bottom }}px; display: flex; flex-direction: column; gap: 36px;
+  }
+  .logo { height: 72px; width: auto; align-self: flex-start; object-fit: contain; }
+  .image { flex: 1 1 auto; min-height: 0; border-radius: 28px; background-size: cover; background-position: center; }
+  .spacer { flex: 1 1 auto; }
+  .copy { flex: 0 0 auto; display: flex; flex-direction: column; gap: 26px; }
+  .bar { width: 120px; height: 12px; border-radius: 6px; background: var(--accent); }
+  .headline {
+    margin: 0; color: var(--text); font: 700 {{ sizes.headline }}px/1.08 {{ kit.heading_font | safe }};
+    letter-spacing: -0.01em; max-height: {{ (sizes.headline * 1.08 * 3) | round(0, 'ceil') | int }}px; overflow: hidden;
+  }
+  .subcopy {
+    margin: 0; color: var(--text); font: 400 {{ sizes.subcopy }}px/1.3 {{ kit.body_font | safe }};
+    max-height: {{ (sizes.subcopy * 1.3 * 4) | round(0, 'ceil') | int }}px; overflow: hidden;
+  }
+  .cta {
+    align-self: flex-start; background: var(--primary); color: var(--cta-text);
+    font: 600 {{ sizes.cta }}px/1.1 {{ kit.body_font | safe }}; padding: 26px 46px; border-radius: 999px;
+    white-space: nowrap; max-width: {{ width - 160 }}px; overflow: hidden; text-overflow: clip;
+  }
+</style>
+</head>
+<body>
+  <div class="canvas" id="canvas">
+    {% if kit.logo %}<img class="logo" src="{{ kit.logo }}" alt="{{ brand_name }} logo">{% endif %}
+    {% if kit.product_image and show_image %}
+    <div class="image" role="img" aria-label="{{ slots.alt_text }}" style="background-image: url('{{ kit.product_image }}')"></div>
+    {% else %}
+    <div class="spacer"></div>
+    {% endif %}
+    <div class="copy">
+      <div class="bar"></div>
+      <h1 class="headline" data-slot="headline">{{ slots.headline }}</h1>
+      {% if slots.subcopy %}<p class="subcopy" data-slot="subcopy">{{ slots.subcopy }}</p>{% endif %}
+      <span class="cta" data-slot="cta">{{ slots.cta }}</span>
+    </div>
+  </div>
+</body>
+</html>

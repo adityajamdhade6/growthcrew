@@ -79,6 +79,51 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--weeks", type=int, default=2)
     p.add_argument("--max-items", type=int, default=8)
 
+    p = commands.add_parser("monitor", help="Run the competitor, SEO and social monitors")
+    p.add_argument("workspace")
+
+    p = commands.add_parser("creative", help="Render an ad draft as images, with the vision critic")
+    p.add_argument("workspace")
+    p.add_argument("--draft", type=int, required=True, help="The ad draft's id")
+
+    p = commands.add_parser("landing", help="Export approved landing hero variants as HTML")
+    p.add_argument("workspace")
+    p.add_argument("--draft", type=int, required=True, help="Any variant's draft id")
+
+    p = commands.add_parser("mcp", help="Serve GrowthCrew over MCP, or mint an approval token")
+    p.add_argument("action", choices=["serve", "approve"])
+    p.add_argument("--user", required=True, help="The GrowthCrew user it acts as, or approves as")
+    p.add_argument("--workspace", help="approve: the workspace the token is for")
+    p.add_argument("--allow", default="propose_content", help="approve: the action allowed")
+
+    p = commands.add_parser("connect", help="Store a source's API key and settings (encrypted)")
+    p.add_argument("workspace")
+    p.add_argument("provider", choices=["brevo", "hubspot", "mcp", "google"])
+    p.add_argument("--key-env", help="Name of the environment variable holding the API key")
+    p.add_argument("--set", action="append", default=[], metavar="NAME=VALUE")
+
+    p = commands.add_parser("sync", help="Pull fresh metrics from every connected source")
+    p.add_argument("workspace")
+
+    p = commands.add_parser("scheduler", help="Daily metrics sync and weekly analysis")
+    p.add_argument("--loop", action="store_true", help="Keep running, checking every hour")
+    p.add_argument("--analyse", action="store_true", help="Also run the weekly analyst")
+
+    p = commands.add_parser("trace", help="Print a weekly cycle's trace, or export it as OTLP")
+    p.add_argument("cycle", type=int)
+    p.add_argument("--otlp", type=Path, help="Write the trace as OTLP/JSON to this file")
+
+    p = commands.add_parser("worker", help="Run queued jobs (weekly cycles, monitors, syncs)")
+    p.add_argument("--once", action="store_true", help="Run what is due, then stop")
+
+    p = commands.add_parser("db", help="Database migrations")
+    p.add_argument("action", choices=["upgrade", "verify-audit"])
+
+    p = commands.add_parser("pause", help="Pause or resume every agent (the kill switch)")
+    p.add_argument("state", choices=["on", "off"])
+    p.add_argument("--workspace", help="Only this workspace")
+    p.add_argument("--by", required=True, help="Who is pausing")
+
     p = commands.add_parser("cycle", help="Run this week's cycle up to the approval stage")
     p.add_argument("workspace")
     p.add_argument("--max-items", type=int, default=5)
@@ -114,6 +159,9 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
+    from growthcrew.safety import install_scrubber
+
+    install_scrubber()
 
     if args.command == "onboard":
         if args.answers:
@@ -180,6 +228,166 @@ def main(argv: list[str] | None = None) -> int:
         cycle = orchestrator.run(orchestrator.start_cycle(args.workspace).id)
         print(render_timeline(timeline(orchestrator.engine, cycle.id)))
         print("\nApprove, edit or reject drafts through the API: POST /drafts/<id>/decision")
+    elif args.command == "monitor":
+        from growthcrew.monitor.run import run_monitors
+
+        load_brain(args.workspace)
+        if (llm := _llm()) is None:
+            return 1
+        result = run_monitors(llm, llm.engine, args.workspace, Path("workspaces"))
+        found = ", ".join(f"{name} {count}" for name, count in result.found.items()) or "nothing"
+        print(f"Found: {found}. New signals: {result.stored}; duplicates skipped: "
+              f"{result.duplicates}.")  # fmt: skip
+        for failure in result.failures:
+            print(f"Failed: {failure}")
+        print(f"Digest: {result.digest_path}")
+    elif args.command == "creative":
+        from sqlmodel import Session
+
+        from growthcrew.creative.agent import CreativeAgent
+        from growthcrew.creative.images import generator
+        from growthcrew.creative.render import renderer
+        from growthcrew.db.models import Draft
+
+        brand = load_brain(args.workspace)
+        if (llm := _llm()) is None:
+            return 1
+        with Session(llm.engine) as session:
+            draft = session.get(Draft, args.draft)
+        if draft is None or draft.workspace != args.workspace:
+            print(f"No draft {args.draft} in {args.workspace}")
+            return 1
+        with renderer() as browser:
+            agent = CreativeAgent(llm, llm.engine, browser, Path("workspaces"), generator())
+            result = agent.run(draft, brand)
+        for item in result.rounds:
+            lowest = min((min(row.values()) for row in item.scores.values()), default=0)
+            print(f"Round {item.round}: {'passed' if item.passed else 'not passed'}, "
+                  f"lowest score {lowest}{'; blocked' if item.blocked else ''}")  # fmt: skip
+        print(f"Images: workspaces/{args.workspace}/creative/{draft.id}/")
+    elif args.command == "landing":
+        from growthcrew.creative.landing import export_variants
+        from growthcrew.db.session import get_engine
+
+        brand = load_brain(args.workspace)
+        for path in export_variants(get_engine(), args.draft, brand, Path("workspaces")):
+            print(path)
+    elif args.command == "mcp":
+        from growthcrew.db.session import get_engine
+        from growthcrew.mcp_server import TOKEN_TTL, build_server, mint_approval
+
+        if args.action == "approve":
+            if not args.workspace:
+                print("--workspace is required")
+                return 1
+            print(mint_approval(args.workspace, args.allow, args.user))
+            print(f"Valid once, for {TOKEN_TTL // 60} minutes, for {args.allow} in "
+                  f"{args.workspace}.", file=sys.stderr)  # fmt: skip
+            return 0
+
+        def make_llm():
+            from growthcrew.llm import LLM
+
+            return LLM(engine=get_engine())
+
+        build_server(get_engine(), args.user, llm_factory=make_llm).run("stdio")
+    elif args.command == "connect":
+        import os
+
+        from growthcrew.connectors import store as connectors
+        from growthcrew.db.session import get_engine
+
+        settings = dict(item.split("=", 1) for item in args.set)
+        secret = None
+        if args.key_env:
+            if not os.getenv(args.key_env):
+                print(f"{args.key_env} is not set")
+                return 1
+            secret = {"api_key": os.environ[args.key_env]}
+        elif args.provider == "mcp":
+            secret = {}
+        connectors.save(get_engine(), args.workspace, args.provider, "cli", secret=secret,
+                        settings=settings or None)  # fmt: skip
+        print(f"Saved {args.provider} for {args.workspace}. The key is stored encrypted.")
+    elif args.command == "sync":
+        from growthcrew.connectors.sync import sync_workspace
+        from growthcrew.db.session import get_engine
+
+        for run in sync_workspace(get_engine(), args.workspace, Path("workspaces")):
+            print(f"{run.provider}: {run.status}, {run.rows} rows, {run.matched} matched "
+                  f"{run.error}".rstrip())  # fmt: skip
+    elif args.command == "scheduler":
+        import time
+
+        from growthcrew.db.session import get_engine
+        from growthcrew.scheduler import tick
+
+        analyst = None
+        if args.analyse:
+            from growthcrew.agents.analyst import AnalystAgent
+
+            if (llm := _llm()) is None:
+                return 1
+            analyst = AnalystAgent(llm)
+        while True:
+            for line in tick(get_engine(), Path("workspaces"), analyst=analyst) or ["nothing due"]:
+                print(line, flush=True)
+            if not args.loop:
+                break
+            time.sleep(3600)
+    elif args.command == "trace":
+        from sqlmodel import Session
+
+        from growthcrew import tracing
+        from growthcrew.db.models import Cycle
+        from growthcrew.db.session import get_engine
+
+        engine = get_engine()
+        with Session(engine) as session:
+            cycle = session.get(Cycle, args.cycle)
+        if cycle is None or not cycle.trace_id:
+            print(f"Cycle {args.cycle} has no trace")
+            return 1
+        if args.otlp:
+            args.otlp.write_text(json.dumps(tracing.otlp(engine, cycle.trace_id), indent=2))
+            print(f"Wrote {args.otlp}")
+        else:
+            print(tracing.render(tracing.tree(engine, cycle.trace_id)))
+    elif args.command == "worker":
+        from growthcrew.db.session import get_engine
+        from growthcrew.jobs import default_handlers, run_worker
+
+        llm = _llm()
+        done = run_worker(get_engine(), default_handlers(llm),
+                          max_jobs=10_000 if args.once else None)  # fmt: skip
+        print(f"Ran {done} jobs")
+    elif args.command == "db":
+        from sqlmodel import create_engine
+
+        from growthcrew import audit
+        from growthcrew import config as settings
+        from growthcrew.db.session import engine_url, upgrade
+
+        engine = create_engine(engine_url(settings.DATABASE_URL))
+        if args.action == "upgrade":
+            upgrade(engine)
+            print("Database is at the latest migration")
+        else:
+            broken = audit.verify(engine)
+            print(
+                "Audit log chain intact" if broken is None else f"Audit log broken at row {broken}"
+            )
+            return 0 if broken is None else 1
+    elif args.command == "pause":
+        from growthcrew import audit, safety
+        from growthcrew.db.session import get_engine
+
+        engine = get_engine()
+        safety.set_paused(engine, args.state == "on", args.by, args.workspace)
+        audit.record(engine, args.workspace or "*", args.by,
+                     "agents.paused" if args.state == "on" else "agents.resumed")  # fmt: skip
+        print(f"Agents {'paused' if args.state == 'on' else 'resumed'} "
+              f"({args.workspace or 'all workspaces'})")  # fmt: skip
     elif args.command == "user":
         import getpass
 

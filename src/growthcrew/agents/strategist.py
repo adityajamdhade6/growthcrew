@@ -1,5 +1,6 @@
 """Strategist: brain + research -> StrategyDoc, with one devil's-advocate revision."""
 
+import json
 from pathlib import Path
 
 from pydantic import BaseModel, create_model
@@ -25,6 +26,8 @@ from growthcrew.frameworks.messaging_house import MessagingHouse
 from growthcrew.frameworks.positioning import Positioning
 from growthcrew.frameworks.test_and_learn import TestPlan
 from growthcrew.llm import LLM, Conversation
+from growthcrew.memory import playbook
+from growthcrew.monitor import signals as monitor_signals
 
 WORKSPACES_DIR = Path("workspaces")
 EXPERIMENTS = 5
@@ -83,7 +86,12 @@ a reason. Rejecting a point is fine when the evidence is on your side. Then you 
 for each section again. First, write the revision log."""
 
 
-def build_evidence(brand: Brain, research: ResearchReport) -> list[EvidenceItem]:
+def build_evidence(
+    brand: Brain,
+    research: ResearchReport,
+    rules: list | None = None,
+    signals: list | None = None,
+) -> list[EvidenceItem]:
     items: list[EvidenceItem] = []
     for path in FIELD_PATHS:
         if brand.is_empty(path):
@@ -118,6 +126,24 @@ def build_evidence(brand: Brain, research: ResearchReport) -> list[EvidenceItem]
                 id=f"voc:{number}",
                 text=f"Customer theme '{theme.theme}' ({theme.frequency} quotes): {quotes}",
                 source_url=theme.quotes[0].source_url if theme.quotes else "",
+            )
+        )
+    # Patterns found in this brand's own published results.
+    for rule in rules or []:
+        items.append(
+            EvidenceItem(
+                id=f"rule:{rule.id}", text=playbook.describe(rule), quality="playbook rule, active"
+            )
+        )
+    # Monitor findings a person sent to the strategist from the Signals inbox.
+    for signal in signals or []:
+        sources = json.loads(signal.sources)
+        items.append(
+            EvidenceItem(
+                id=f"signal:{signal.id}",
+                text=f"{signal.title}: {signal.summary}",
+                source_url=", ".join(source["url"] for source in sources),
+                quality=f"monitor finding, {sources[0]['date'] if sources else 'undated'}",
             )
         )
     return items
@@ -297,9 +323,22 @@ class StrategyInput(BaseModel):
 class StrategistAgent:
     role = AgentRole.STRATEGIST
 
-    def __init__(self, llm: LLM, root: Path = WORKSPACES_DIR) -> None:
+    def __init__(
+        self, llm: LLM, root: Path = WORKSPACES_DIR, mixlab=None, budget_total: float = 0.0
+    ) -> None:
         self.llm = llm
         self.root = root
+        # Optional MixLab client (integrations.mixlab). Its split is advice: a planned share
+        # outside its interval becomes an issue to explain or fix, never an automatic change.
+        self.mixlab, self.budget_total = mixlab, budget_total
+
+    def _mix_issues(self, core: StrategyCore, workspace: str) -> list[str]:
+        if self.mixlab is None or self.budget_total <= 0:
+            return []
+        from growthcrew.integrations import mixlab
+
+        advice = self.mixlab.optimize_budget(workspace, self.budget_total)
+        return mixlab.review_split(mixlab.plan_split(core), advice)
 
     def _write(self, chat: Conversation, lead: str = "", revised: bool = False) -> StrategyCore:
         """Apply each framework in turn, one structured output per framework."""
@@ -418,7 +457,9 @@ class StrategistAgent:
 
     def run(self, inp: StrategyInput, workspace: str | None = None) -> StrategyDoc:
         workspace = workspace or inp.brand.workspace
-        evidence = build_evidence(inp.brand, inp.research)
+        rules = playbook.rules(self.llm.engine, workspace, "active")
+        sent = monitor_signals.for_strategist(self.llm.engine, workspace)
+        evidence = build_evidence(inp.brand, inp.research, rules, sent)
         known = {item.id for item in evidence}
         rendered = render_evidence(evidence)
 
@@ -426,7 +467,7 @@ class StrategistAgent:
             self.role, system=f"{SYSTEM}\n\n{BRAIN_NOTE}", workspace=workspace
         )
         draft = self._write(chat, lead=f"Evidence:\n{rendered}\n\n")
-        draft_issues = check(draft, known)
+        draft_issues = check(draft, known) + self._mix_issues(draft, workspace)
 
         critique = self.critique(draft, rendered, workspace)
         revision = chat.extract(
@@ -437,7 +478,7 @@ class StrategistAgent:
             RevisionLog,
         )
         final = self._write(chat, revised=True)
-        issues = check(final, known)
+        issues = check(final, known) + self._mix_issues(final, workspace)
 
         return StrategyDoc(
             **final.model_dump(),

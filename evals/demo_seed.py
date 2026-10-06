@@ -58,6 +58,10 @@ from growthcrew.frameworks.jtbd import Job, JobsToBeDone
 from growthcrew.frameworks.messaging_house import MessagingHouse, Pillar
 from growthcrew.frameworks.positioning import Positioning
 from growthcrew.frameworks.test_and_learn import Experiment
+from growthcrew.memory import playbook
+from growthcrew.memory.miner import mine
+from growthcrew.memory.simulate import run as simulate_memory
+from growthcrew.monitor import signals
 from growthcrew.reports.strategy import save_strategy
 
 WORKSPACE = "demo-loomhouse"
@@ -344,6 +348,94 @@ def _history(text: str, scores: dict, edits=(), violations=()) -> str:
     return json.dumps([first, {**version, "round": 2}] if first else [version])
 
 
+def seed_panel(engine) -> None:
+    """A sample synthetic panel and its pre-test of the ad test, simulated for the demo."""
+    import random
+
+    from growthcrew.db.models import ExperimentRegistration, PanelRun, Persona
+    from growthcrew.panel.pretest import aggregate, recommend
+
+    with Session(engine) as session:
+        test = session.exec(
+            select(ExperimentRegistration).where(
+                ExperimentRegistration.workspace == WORKSPACE,
+                ExperimentRegistration.experiment == "07-day03-ad",
+            )
+        ).first()
+    if test is None:
+        return
+    labels = json.loads(test.data)["variants"]
+    people = [
+        ("Maya", "Hot sleeper who wakes at 3am kicking off the duvet", "hot sleepers"),
+        ("Tom", "New homeowner furnishing a guest room on a budget", "first home"),
+        ("Priya", "Buys gifts for weddings from the registry", "gift buyers"),
+        ("Dan", "Sceptical of 'luxury' bedding claims; reads every review", "sceptics"),
+        ("Lena", "Wants natural fibres and cares where they are made", "natural fibres"),
+        ("Sam", "Replaces sheets only when they wear through", "practical"),
+    ]
+    rng = random.Random(4)
+    responses = []
+    with Session(engine) as session:
+        for name, summary, segment in people:
+            profile = {"summary": f"Sample persona: {summary}", "segment": segment,
+                       "demographics": [], "pains": [], "objections": [], "media_habits": [],
+                       "phrases": []}  # fmt: skip
+            session.add(Persona(workspace=WORKSPACE, generation=1, name=name,
+                                profile=json.dumps(profile), support='["brain:icp.pains"]'))  # fmt: skip
+            lean = {"outcome": 1.5, "social_proof": 0.5}
+            responses.append([
+                {"persona": name, "label": label, "position": i,
+                 "stop": max(1, min(7, round(3.5 + lean.get(label, 0) + rng.gauss(0, 1.2)))),
+                 "click": rng.random() < 0.25 + 0.15 * lean.get(label, 0),
+                 "objection": "Sample: not sure linen is worth the price", "confusing": ""}
+                for i, label in enumerate(labels)
+            ])  # fmt: skip
+        prediction = aggregate(responses, labels)
+        session.add(PanelRun(workspace=WORKSPACE, cycle_id=test.cycle_id, experiment=test.experiment,
+                             generation=1, responses=json.dumps(responses),
+                             prediction=prediction.model_dump_json(),
+                             recommendation=recommend(prediction, "untested").model_dump_json(),
+                             trust="untested"))  # fmt: skip
+        session.commit()
+
+
+def seed_signals(engine) -> None:
+    """Sample findings for the Signals inbox. Invented for the demo, like the brand itself."""
+    sample = "Sample data: "
+    findings = [
+        signals.Finding(monitor="competitor", category="price_change",
+                        title="Brightside Linen changed prices on its pricing page",
+                        summary=f"{sample}Prices no longer shown: $179. New prices: $159.",
+                        suggested_response="Check whether our pricing message still holds "
+                        "against the new numbers.", base_importance=0.9,
+                        sources=[signals.Source(url="https://brightside.example/pricing",
+                                                date="2026-10-01")]),
+        signals.Finding(monitor="competitor", category="positioning",
+                        title="Cotton & Co's home page: new positioning",
+                        summary=f"{sample}The headline moved from 'everyday cotton' to "
+                        "'cooling sheets for hot sleepers', the audience Loomhouse targets.",
+                        suggested_response="Lead with lived-in softness and the 60-night "
+                        "trial, where Cotton & Co has no claim.", base_importance=0.8,
+                        sources=[signals.Source(url="https://cottonco.example/",
+                                                date="2026-10-02")]),
+        signals.Finding(monitor="seo", category="keyword_gap",
+                        title="Content gap: linen sheets for hot sleepers",
+                        summary=f"{sample}3 keywords with 6,100 monthly searches where a "
+                        "competitor ranks and we do not.",
+                        suggested_response="Outline: Why linen sleeps cooler; Thread count "
+                        "does not matter for linen; Washing and care", base_importance=0.7,
+                        sources=[signals.Source(url="workspace://demo-loomhouse/seo/keywords.csv",
+                                                date="2026-09-30")]),
+        signals.Finding(monitor="social", category="question",
+                        title="Does linen soften or stay scratchy?",
+                        summary=f'{sample}"Bought linen once and it felt like a sack. Does it '
+                        'actually get softer?"', base_importance=0.5,
+                        sources=[signals.Source(url="workspace://demo-loomhouse/social/reddit.csv#4",
+                                                date="2026-09-29")]),
+    ]  # fmt: skip
+    signals.file_findings(engine, WORKSPACE, findings)
+
+
 def main() -> None:
     engine = get_engine()
     if list_versions(WORKSPACE):
@@ -392,10 +484,17 @@ def main() -> None:
     strategy = demo_strategy(brain, research)
     save_strategy(strategy, WORKSPACES_DIR, pdf=False)
 
+    # Twelve earlier weeks of published LinkedIn posts, mined weekly: the brand's memory and
+    # playbook. Simulated, with one pattern that is real and one that stops holding.
+    simulate_memory(engine, workspace=WORKSPACE)
+
     # Last week: published pieces with performance data, analysed.
     for source, text in seed_performance(engine, workspace=WORKSPACE).items():
         ingest(engine, WORKSPACE, source, text)
     analysis = analyze(engine, WORKSPACE)
+    # The weekly memory job, as it runs at the start of each cycle: remember last week's
+    # pieces and re-test the playbook.
+    mine(engine, WORKSPACE, as_of=datetime(2026, 9, 28, tzinfo=UTC))
     ad = next(r.id for r in analysis.readouts if r.name == "07-day03-ad")
     hero = next(r.id for r in analysis.readouts if r.name == "08-day04-landing_hero")
     posts = next(r.id for r in analysis.readouts if r.name == "linkedin_post by angle")
@@ -507,16 +606,30 @@ def main() -> None:
         for piece, kind, angle, day, text, scores, edits, violations, status in drafts:
             history = _history(text, scores, edits, violations)
             meta = json.loads(history)[-1]["metadata"]
+            # What the writer would have been shown from memory for this piece.
+            _, used = playbook.writer_context(
+                engine, WORKSPACE, kind, f"{text[:120]} {meta['messaging_pillar']}"
+            )
             session.add(Draft(cycle_id=cycle.id, workspace=WORKSPACE, piece_id=piece,
                               content_type=kind, angle=angle, day=day, original_text=text, text=text,
                               body_json="{}", metadata_json=json.dumps(meta),
                               min_score=min(scores.values()),
                               passed_critic=min(scores.values()) >= 8 and not violations,
-                              history_json=history, status=status))  # fmt: skip
+                              history_json=history, status=status,
+                              memory_json=used.model_dump_json(), prompt_version="p-sim00002",
+                              strategy_version=1))  # fmt: skip
         if not session.exec(select(User).where(User.email == DEMO_EMAIL)).first():
             session.commit()
-            create_user(engine, DEMO_EMAIL, DEMO_PASSWORD, "*")
+            # The public demo is read-only: a viewer on the sample workspace, never an admin.
+            demo = create_user(engine, DEMO_EMAIL, DEMO_PASSWORD, WORKSPACE)
+            with Session(engine) as fresh:
+                row = fresh.get(User, demo.id)
+                row.roles = json.dumps({WORKSPACE: "viewer"})
+                fresh.add(row)
+                fresh.commit()
         session.commit()
+    seed_signals(engine)
+    seed_panel(engine)
     print(f"Seeded {WORKSPACE}. Demo login: {DEMO_EMAIL} (password is DEMO_PASSWORD in this file)")
 
 

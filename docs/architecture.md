@@ -78,16 +78,167 @@ GrowthCrew). See [experiments.md](experiments.md) for the reasoning.
 `analytics/registry.py` stores registrations and final verdicts, and registers each A/B-tested
 piece as it is drafted. `analytics/analysis.py` builds the readouts.
 
+## Long-term memory and the playbook
+
+`memory/` lets the system remember what worked months ago, not just last week.
+
+| Module | Does |
+|---|---|
+| `store.py` | Remembers every published piece that has results: text, pillar, angle, persona, hypothesis, final rate, a score against the brand's average, and an embedding. `best_similar` returns the best-performing pieces among those most like a request. |
+| `embed.py` | The `Embedder` interface and a local **lexical** default that hashes words and character n-grams. It matches wording and topic vocabulary, not meaning. A model-backed embedder with pgvector is planned for Phase 9 (see the [roadmap](roadmap.md)). |
+| `features.py` | The yes/no features the miner compares (question hook, number in the hook, and so on). |
+| `miner.py` | The weekly job. Compares pieces with and without each feature, piece against piece, over a rolling six-week window. A pattern must hold on two runs to become an active rule; one miss takes it out of use; three misses or a reversal retire it. A feature must show its effect within groups of the strongest one, so a feature that only rides along does not become a rule. |
+| `playbook.py` | Active rules with their history, what the writer is shown, the editor's check, and performance per prompt and strategy version. |
+
+How agents use it: the writer is shown the brand's own past winners and the active rules before
+drafting, and each draft records what it was shown. The strategist can cite a rule as evidence
+(`rule:N`). The editor is told where a draft goes against an active rule, as advice.
+
+Patterns are observational. They are leads for a registered test, not results, and the
+Playbook page says so.
+
+Recurring human edits become **proposals** in `EditPattern`; a person accepts or rejects each
+one, and only an accepted proposal is written into the brand voice.
+
+Every model call logs a `prompt_version` (a short hash of its system prompt), and every draft
+records the writer prompt version and strategy version that produced it.
+
+## Visual creative and the vision critic
+
+`creative/` turns an ad draft into images and a landing hero into a page. Templates keep the
+layout on-brand; the model only fills slots.
+
+| Module | Does |
+|---|---|
+| `kit.py` | The brand kit from the brain (`brand_kit`: logo, colours, fonts, image style rules, do and don't examples, product photos with descriptions), with readable fallbacks. Images are files under `workspaces/<brand>/brand/`, uploaded through the API (type checked by signature, 5 MB limit), never URLs. |
+| `templates/ad.html.j2`, `render.py` | One HTML template rendered by headless Chromium at 1:1 (1080x1080), 4:5 (1080x1350) and 9:16 (1080x1920, text kept out of the areas the platform's buttons cover). Every network request is refused while rendering. The page is measured as it renders: font sizes, clipped text, text outside the safe area, the share of the image covered by text, the word count. |
+| `access.py` | WCAG contrast (4.5:1 body, 3:1 headline), minimum text sizes, text share (35%), word count (30), alt text that describes the photo. |
+| `agent.py` | The loop: the model fills slots (headline, sub-copy, button, alt text, a text scale per size) from the draft's copy; the slots go through the guardrails; each size is rendered and checked; the vision critic sees all three (at phone size, 540px wide) and scores readability, hierarchy, brand consistency, thumb-stopping power and platform rules, with fixes aimed at one slot. A failed check caps the score it concerns at 5. Passing needs every score 8 or more on every size and good alt text; at most 3 rounds, and the last round is kept either way. |
+| `images.py` | Optional AI backgrounds (OpenAI Images), off unless `GROWTHCREW_AI_IMAGES=1`. The prompt is built in code and asks for no text, logos or faces. Every generated image is stored with its model, prompt and date and shown as AI-generated. |
+| `landing.py` | A landing hero draft (its current, possibly edited text) as a standalone HTML page, one per angle. Previewed in a sandboxed frame; written to files only for approved variants. |
+
+Images are part of the draft's review: the review panel shows the three sizes side by side
+with the critic's scores, fixes and the measured checks, and says when the text has been
+edited since the images were made. Downloading an image for use needs an approved ad.
+
+## Live data and MCP
+
+`connectors/` pulls Search Console, GA4, Brevo and HubSpot data daily (`scheduler.py`) into the
+same matching path as CSV uploads (`analytics.ingest.store_rows`), so unmatched rows are still
+reported, never guessed. Credentials are per workspace and encrypted (`keys.py`). Brevo is the
+first registered publisher, reachable only through `workflow.publish`. `mcp_server.py` exposes
+read-only tools and one approval-token-gated write tool; `connectors/mcp_source.py` reads rows
+from other MCP servers. See [mcp.md](mcp.md).
+
+## The synthetic audience panel
+
+`panel/` pre-tests every new experiment before launch, at the end of the weekly cycle's critic
+stage (a failure never halts the cycle). Personas are written from the brain and research,
+each citing evidence; each persona reacts to every variant in a shuffled order; the reactions
+are aggregated in code into a predicted ranking with resampled probabilities. Once the real
+test has a final verdict, the prediction is scored against it (rank correlation, top-pick hit
+rate), and that record sets how far the panel is trusted. It never picks a winner; it can only
+suggest dropping a clearly weak variant from a test of three or more, and stops suggesting
+anything when its record is poor. See [panel.md](panel.md) for the rules and its known biases.
+
+## Always-on research: the monitors and the Signals inbox
+
+`monitor/` watches what changes around the brand each week and files each finding in the
+Signals inbox. The monitors run at the start of every weekly cycle (a failure never halts the
+cycle), and on demand from `growthcrew monitor <workspace>` or the Signals page.
+
+| Module | Does |
+|---|---|
+| `competitors.py` | Snapshots each watched page (`PageSnapshot`) and diffs it with last week's. Price changes and new blog posts are found in code; the model only judges whether other changes are a copy tweak or new positioning, and suggests a response. Ads come from Meta Ad Library (or similar) exports in `workspaces/<brand>/ads/`, classified by hook, angle and offer; labels for ads not in the export are dropped. |
+| `seo.py` | Reads Search Console and keyword-research exports from `workspaces/<brand>/seo/`. Gaps (a competitor top 10, us absent or below 20th), topic clusters (lexical: keywords sharing words) and ranking moves (5 places or more) are computed in code. The model writes one brief per cluster; internal links that are not the brand's own pages are removed. |
+| `social.py` | Reads exported posts (Reddit and review sites do not allow scraping) and forum pages that robots.txt allows. Pains, questions and phrases each carry a quote, kept only if word for word in its post. Spikes are counted in code against the previous four weeks. |
+| `settings.py` | What to watch: `workspaces/<brand>/monitor.json`, or each brain competitor's home, pricing and blog pages. |
+| `signals.py` | Stores findings once (same fingerprint, or lexically near-identical to a recent signal or a research claim, is a duplicate), ranks them, and writes the weekly digest to `workspaces/<brand>/signals/<date>.md`. |
+
+**Ranking** is computed: base importance set by the monitor (a price change 0.9, a copy tweak
+0.2) x a weight per category learned from people's choices (sent versus dismissed, a Beta(1,1)
+mean, so an even record leaves it at 1) x a half-life of 14 days. Dismissing a kind of signal
+ranks that kind lower.
+
+**Send to strategist** makes a signal citable as `signal:N` evidence, and the next cycle
+rewrites the strategy because there is new evidence. Nothing a monitor finds changes the
+strategy unless a person sends it.
+
+**Prompt injection.** Fetched pages, exports and reviews are untrusted. `tools/untrusted.py`
+wraps every piece of it in `<untrusted_content>` delimiters that the text cannot close (any
+delimiter inside is neutralised), and every system prompt that reads it carries the rule that
+it is data. The monitors make single structured calls with no tools, so fetched text can never
+pick a tool; the research agent's tool results are wrapped the same way. Output is checked in
+code afterwards: uncited findings are dropped, quotes must be verbatim, links must be known.
+Text that reads like instructions to a model is flagged on the signal for the reader.
+
+## Evals, red team, tracing and the CI gate
+
+- **Tracing** (`tracing.py`). Each weekly cycle is one trace: a span for the run, one per
+  stage, one per model call (model, tokens, cost, latency, stop reason) and one per tool call.
+  `GET /cycles/{id}/trace` returns it as a tree; `/trace.otlp.json` and `growthcrew trace
+  <cycle> --otlp` export OTLP/JSON for Jaeger, Tempo or Langfuse.
+- **Agent limits** (`budgets.py`). Each agent has a cost and latency limit per call
+  (`config.AGENT_LIMITS`); a call over it raises one alert per agent per day.
+  `/costs/agents` shows mean and p95 against the limits.
+- **Golden set**: 3 brands x 25 requests, 21 of them hard cases (regulated categories, thin
+  brand data, conflicting research, named competitors). References are written by a person.
+- **Pairwise evals** (`judge.judge_pair`). New output against the last run's, judged in both
+  orders; a preference counts only if it survives the swap. Reported as a win rate with a
+  Wilson 95% interval. The pairwise judge is trusted only after it agrees with people on 50
+  labelled pairs at 75% or more.
+- **Red team** (`evals/redteam.py`). 39 attacks that must all fail: injected pages, uploads
+  and posts; invented ratings, counts and testimonials; defamation; health, finance and legal
+  claims; reading another workspace's rows through every id-based route and over MCP;
+  runaway spending and tool loops; approving blocked drafts and reusing approval tokens.
+- **Gate** (`evals/gate.py`). CI fails a pull request on any failed eval, any red-team
+  failure, or a tracked metric falling beyond its tolerance against `evals/baseline.json`,
+  and posts the scorecard as a comment.
+- **Routing experiment** (`evals/routing.py`, `make eval-routing`). Cheaper drafting models
+  against the defaults: judge score with a bootstrap interval and cost per piece, per arm.
+
+## The production backbone
+
+See [operations.md](operations.md). In short: Postgres with Alembic migrations and pgvector;
+a durable job queue (`jobs.py`) with leases, heartbeats, backoff and dead-lettering, so a
+killed worker's cycle is resumed by another; model responses cached per cycle by request hash
+(`llm.cache_scope`) so a resumed stage does not pay twice; tenant scoping of every query
+(`tenancy.py`); roles per workspace and a hash-chained, append-only audit log (`audit.py`);
+the kill switch and the log scrubber (`safety.py`); request rate limits; health checks and
+optional Sentry (`observability.py`).
+
+## Product UX v2: approval channels, live mission, replay
+
+- **Approval channels** (`approvals.py`, routes in `api/ux.py`): Slack interactive messages
+  (signature checked with the workspace's signing secret, rejected after 5 minutes; the Slack
+  user must be linked to a GrowthCrew user) and a weekly email digest with one signed link per
+  decision. A link names the user, the draft and the decision, expires in 72 hours, works once,
+  and only opens a confirmation page, so a mail scanner cannot approve. Both paths need the
+  approver or owner role, end in `workflow.decide` and are written to the audit log with the
+  channel. Linked Slack users live in `ChannelIdentity` (migration 0003).
+- **Mission control** streams the cycle over server-sent events (`/mission/stream`), falling
+  back to polling; **replay** steps through a past week's stages.
+- **Review panel**: keyboard shortcuts (A approve, R reject, E edit, J/K next/previous) and a
+  tracked-changes view of human edits (`web/lib/diff.ts`).
+- **Creative gallery** and **Evals** pages (scorecard plus the latest cycle's trace), a light,
+  dark or system theme, a phone "More" menu, and a read-only demo login
+  (`GROWTHCREW_DEMO=1`, viewer role) with a five-step tour. The demo uses sample data only.
+
+## MixLab connection
+
+See [mixlab.md](mixlab.md): the strategist checks its channel plan against MixLab's budget
+split and interval (`integrations/mixlab.py`), and final verdicts go back as calibration.
+
 ## The weekly cycle
 
 ```mermaid
 stateDiagram-v2
     [*] --> research
-    research --> strategy_check
-    strategy_check --> content_plan: strategy rewritten only on new evidence;<br/>last week's changes ruled on
+    research --> strategy_check: monitors file signals;<br/>weekly memory job re-tests the playbook
+    strategy_check --> content_plan: strategy rewritten only on new evidence<br/>(new sources or signals sent from the inbox);<br/>last week's changes ruled on
     content_plan --> drafting: accepted changes applied to the plan
     drafting --> critic: writer and editor loop per piece
-    critic --> awaiting_approval
+    critic --> awaiting_approval: synthetic panel pre-tests each new experiment
     awaiting_approval --> scheduled: a named person approves, edits or rejects each draft
     scheduled --> published: the owner publishes and confirms
     published --> measured: results uploaded
@@ -104,7 +255,8 @@ restart or the budget resumes from the stage it stopped at.
    from LinkedIn, Search Console, GA4, the email tool and the ad platform come in.
 2. **Evidence.** The researcher's claims, each with its source URL, and the brain's fields,
    each tagged confirmed or inferred, are numbered into one evidence list
-   (`brain:icp.pains`, `learning:2`, `claim:14`, `voc:1`). The strategy cites these IDs.
+   (`brain:icp.pains`, `learning:2`, `claim:14`, `voc:1`, `rule:3`, `signal:7`). The strategy
+   cites these IDs.
 3. **Content.** A content plan becomes drafts. Each draft carries the pillar it serves, the
    persona, the call to action and the hypothesis it tests, plus a tracking key.
 4. **Gate.** Guardrails, then the editor's scores, then a person. Blocked drafts cannot be
@@ -133,10 +285,17 @@ Two places, both local by default.
 | `content/<timestamp>/` | A batch: every draft, score and revision |
 | `learnings/<timestamp>.json` | Each week's learnings |
 | `reviews/<source>.csv` | Review exports the owner supplies for sites that forbid scraping |
+| `monitor.json` | Optional: the competitor pages, forums and keywords to watch |
+| `ads/`, `seo/`, `social/` | Ad library exports, Search Console and keyword exports, exported posts |
+| `signals/<date>.md` | Each week's signals digest |
+| `brand/` | The brand kit's logo and product photos |
+| `creative/<draft id>/r<round>-<size>.png` | Rendered ad images; `ai-*.png` and `.json` for generated backgrounds |
+| `creative/landing/<piece>/<angle>.html` | Exported landing page variants |
 | `pilot/` | Baseline, weekly log, tracker, reports, testimonial |
 
-**Database** (SQLite via SQLModel; `DATABASE_URL` to change it). Tables are created and new
-columns added at startup; there is no migration tool yet.
+**Database** (SQLModel; SQLite in development, Postgres 16 with pgvector in production via
+`DATABASE_URL`). Alembic migrations in `db/migrations/` (applied on start with
+`GROWTHCREW_MIGRATIONS=alembic`); development creates tables directly.
 
 | Table | Holds |
 |---|---|
@@ -147,9 +306,20 @@ columns added at startup; there is no migration tool yet.
 | `PerformanceRow` | Normalised rows from uploaded analytics exports |
 | `ExperimentRegistration` | Each test's pre-registration and, once judged at its planned sample, its final verdict |
 | `Learnings`, `ChangeDecision` | Weekly learnings and the strategist's ruling on each change |
-| `BrainVersion`, `EditPattern` | Which brain fields changed, and edit patterns on their way to becoming voice rules |
+| `BrainVersion`, `EditPattern` | Which brain fields changed, and recurring edits proposed as voice rules, with each proposal's status |
+| `MemoryPiece` | Content memory: each measured piece with its features, score and embedding |
+| `PlaybookRule`, `RuleEvent` | Each mined pattern, its status, and one history entry per weekly run |
 | `User`, `WorkspaceBudget`, `RoleModel`, `Alert` | Sign-in and workspace access, spending limits, model choices, alerts |
 | `OnboardingJob`, `StrategyComment` | Progress of background work started from the web app |
+| `PageSnapshot`, `SeenItem` | Weekly text of each watched competitor page, and ads and posts already reported |
+| `KeywordRank` | Search Console rows: each query's position, clicks and impressions by date |
+| `Creative` | Each rendered size of an ad image per critic round: slots, scores, fixes, measured checks, whether it passed, whether any image on it was AI-generated |
+| `Persona`, `PanelRun` | Synthetic personas by generation, with their evidence; each pre-test with every reaction, the predicted ranking, the advice and the trust level at the time |
+| `Job`, `LLMCache` | Queued work with leases and retries; model responses cached per cycle for resumed jobs |
+| `AuditLog`, `SystemFlag` | The hash-chained, append-only audit log; the kill switch |
+| `Span` | Trace spans: cycle, stage, model call and tool call, with timings and attributes |
+| `ConnectorCredential`, `SyncRun`, `CrmSnapshot`, `ApprovalTokenUse` | Encrypted per-workspace credentials, each sync's result, daily CRM counts, spent MCP approval tokens |
+| `Signal` | Monitor findings with their sources and dates, importance, status (new, sent, dismissed) and who decided |
 
 Fetched pages and search results are cached on disk under `.cache/` for up to a week.
 
@@ -158,12 +328,14 @@ Fetched pages and search results are cached on disk under `.cache/` for up to a 
 - **API** (`api/`): FastAPI. Every route requires a signed token and access to the workspace
   involved.
 - **Web app** (`web/`): Next.js, talking to the API through a same-origin proxy.
+- **Slack and email** (`approvals.py`): approve or reject pending drafts; see above.
 - **Streamlit demo** (`streamlit_app.py`): read-only, sample data.
-- **CLI** (`cli.py`): onboarding, research, strategy, content, cycles, users, the pilot.
+- **CLI** (`cli.py`): onboarding, research, monitoring, strategy, content, cycles, users, the pilot.
 - **Evals** (`evals/`): the regression suite and scorecard, run in CI.
 
 ## What is outside the system
 
-The model (Anthropic API), a search API, and the sites the researcher reads. Fetches go through
+The model (Anthropic API), a search API, the sites the researcher and the monitors read, and,
+only when switched on, an image-generation API. Fetches go through
 one client that refuses private addresses, honours robots.txt, rate-limits per host and caches.
-Nothing is sent anywhere else, and nothing is posted to any platform.
+Approved newsletters can be sent through Brevo by a named person; nothing else is posted anywhere.

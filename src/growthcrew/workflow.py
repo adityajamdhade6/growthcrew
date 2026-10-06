@@ -12,7 +12,7 @@ from typing import Literal
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
-from growthcrew import guardrails
+from growthcrew import audit, guardrails
 from growthcrew.brain.learning import record_edit
 from growthcrew.brain.store import WORKSPACES_DIR, load_brain
 from growthcrew.db.models import Approval, CalendarItem, Cycle, Draft
@@ -146,6 +146,8 @@ def decide(
         refresh_stage(session, draft.cycle_id)
         session.commit()
         workspace = draft.workspace
+    audit.record(engine, workspace, reviewer, f"draft.{decision}", f"draft:{draft_id}",
+                 piece=draft.piece_id, comment=comment, diff=diff)  # fmt: skip
     if decision == "edited":
         learned = record_edit(engine, workspace, original, edited_text, root)
     return approval, learned
@@ -184,7 +186,9 @@ def publish(
         session.flush()
         refresh_stage(session, item.cycle_id)
         session.commit()
-        return item
+    audit.record(engine, item.workspace, published_by, "draft.published", f"draft:{draft.id}",
+                 via=via, url=url, external_id=item.external_id)  # fmt: skip
+    return item
 
 
 def record_metrics(engine: Engine, item_id: int, metrics: dict[str, float]) -> CalendarItem:

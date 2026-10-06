@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { api, ApiError, useApi } from "@/lib/api";
+import { api, ApiError, useStream } from "@/lib/api";
+import { ReplayWeek } from "@/components/replay";
 import { label, money, plural, useSession } from "@/lib/session";
 import { Badge, Button, Card, Empty, ErrorState, Loading, Notice, PageHeader, SectionTitle, statusTone } from "@/components/ui";
 
@@ -43,8 +44,10 @@ function memberState(timeline: Timeline | null, stages: string[]) {
 
 export default function MissionControl() {
   const { workspace } = useSession();
-  const mission = useApi<Mission>(`/workspaces/${workspace}/mission`, 4000);
+  // Live: the server pushes the mission view whenever it changes (polling if it cannot).
+  const mission = useStream<Mission>(`/workspaces/${workspace}/mission/stream`, `/workspaces/${workspace}/mission`);
   const [busy, setBusy] = useState(false);
+  const [replaying, setReplaying] = useState(false);
   const [actionError, setActionError] = useState<ApiError | null>(null);
 
   async function act(path: string) {
@@ -82,6 +85,15 @@ export default function MissionControl() {
         }
       />
       {actionError && <div className="mb-4"><ErrorState error={actionError} /></div>}
+      <div className="mb-4">
+        {replaying ? (
+          <ReplayWeek workspace={workspace} onClose={() => setReplaying(false)} />
+        ) : (
+          <button onClick={() => setReplaying(true)} className="text-sm font-medium text-accent">
+            Replay the last week in 60 seconds
+          </button>
+        )}
+      </div>
 
       {timeline?.halted_reason && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-bad/30 bg-bad-soft px-4 py-3 text-sm text-bad">

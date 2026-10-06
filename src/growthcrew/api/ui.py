@@ -5,11 +5,12 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import Engine, func
 from sqlmodel import Session, select
 
-from growthcrew import budget, config
+from growthcrew import audit, budget, budgets, config, safety, tracing
 from growthcrew.agents.orchestrator import timeline
 from growthcrew.agents.research import load_latest_research
 from growthcrew.agents.strategist import SECTIONS, StrategistAgent, load_latest_strategy
@@ -17,6 +18,7 @@ from growthcrew.analytics.analysis import analyze
 from growthcrew.analytics.ingest import SOURCES
 from growthcrew.api import auth
 from growthcrew.api.deps import engine_dep, guard, llm_dep
+from growthcrew.brain import learning
 from growthcrew.brain.models import FIELD_PATHS
 from growthcrew.brain.onboarding import Questionnaire, onboard, workspace_name
 from growthcrew.brain.store import (
@@ -27,17 +29,38 @@ from growthcrew.brain.store import (
     update_field,
 )
 from growthcrew.config import AgentRole
+from growthcrew.connectors import google as google_connector
+from growthcrew.connectors import store as connector_store
+from growthcrew.connectors.mcp_source import check_url
+from growthcrew.connectors.sync import sync_workspace
+from growthcrew.creative import agent as creative
+from growthcrew.creative.images import generator as image_generator
+from growthcrew.creative.kit import save_brand_image
+from growthcrew.creative.landing import export_variants, landing_html
+from growthcrew.creative.render import SIZES, renderer
 from growthcrew.db.models import (
     CalendarItem,
+    Creative,
     Cycle,
     Draft,
     OnboardingJob,
+    PanelRun,
     PerformanceRow,
     RoleModel,
+    Signal,
     StrategyComment,
+    User,
 )
 from growthcrew.llm import LLM
+from growthcrew.memory import playbook
+from growthcrew.monitor import signals as monitor_signals
+from growthcrew.monitor.run import run_monitors
+from growthcrew.monitor.seo import ranking_history
+from growthcrew.panel import calibration as panel_calibration
+from growthcrew.panel import personas as panel_personas
 from growthcrew.reports.strategy import save_strategy
+from growthcrew.tools.fetch import BlockedAddress
+from growthcrew.workflow import require_approved
 
 router = APIRouter()
 
@@ -370,6 +393,10 @@ def review(draft_id: int, engine: Engine = Depends(engine_dep)) -> dict:
         "violations": final.get("guardrail_violations", []),
         "first_draft": history[0]["text"] if len(history) > 1 else None,
         "tracking_key": draft.tracking_key,
+        # The past winners and playbook rules the writer was shown.
+        "memory": json.loads(draft.memory_json or "{}"),
+        "prompt_version": draft.prompt_version,
+        "strategy_version": draft.strategy_version,
         "variants": [
             {"id": other.id, "angle": other.angle, "status": other.status,
              "lowest_score": other.min_score}
@@ -455,3 +482,482 @@ def set_model(body: ModelIn, engine: Engine = Depends(engine_dep)) -> dict:
         session.merge(RoleModel(role=body.role.value, model=body.model))
         session.commit()
     return _models(engine)
+
+
+# --- playbook and voice-rule proposals ---
+
+
+@router.get("/workspaces/{workspace}/playbook")
+def get_playbook(workspace: str, engine: Engine = Depends(engine_dep)) -> dict:
+    """Active rules with their evidence and history, and what was learned in 90 days."""
+    return playbook.summary(engine, workspace)
+
+
+class ProposalIn(BaseModel):
+    accept: bool
+
+
+@router.get("/workspaces/{workspace}/voice-proposals")
+def voice_proposals(workspace: str, engine: Engine = Depends(engine_dep)) -> list[dict]:
+    """Voice rules proposed from recurring human edits, waiting for a decision."""
+    return learning.proposals(engine, workspace)
+
+
+@router.post("/workspaces/{workspace}/voice-proposals/{proposal_id}")
+def decide_proposal(
+    workspace: str, proposal_id: int, body: ProposalIn, engine: Engine = Depends(engine_dep)
+) -> dict:
+    outcome = guard(lambda: learning.resolve_proposal(engine, workspace, proposal_id, body.accept))
+    return {"id": proposal_id, "status": outcome}
+
+
+# --- signals inbox ---
+
+
+@router.get("/workspaces/{workspace}/signals")
+def list_signals(
+    workspace: str, status: str = "new", engine: Engine = Depends(engine_dep)
+) -> list[dict]:
+    """Monitor findings with this status, most important first."""
+    if status not in ("new", "sent", "dismissed"):
+        raise HTTPException(400, "status must be new, sent or dismissed")
+    return monitor_signals.inbox(engine, workspace, status)
+
+
+class SignalDecisionIn(BaseModel):
+    action: str
+
+
+@router.post("/signals/{signal_id}")
+def decide_signal(
+    signal_id: int, body: SignalDecisionIn, request: Request, engine: Engine = Depends(engine_dep)
+) -> dict:
+    """Send a signal to the strategist or dismiss it, as the signed-in person."""
+    user = auth.current_user(request)
+    person = user.email if user else "unknown"
+    with Session(engine) as session:
+        signal = session.get(Signal, signal_id)
+        if signal is None:
+            raise HTTPException(404, "Signal not found")
+        workspace = signal.workspace
+    result = guard(
+        lambda: monitor_signals.decide(engine, workspace, signal_id, body.action, person)
+    )
+    audit.record(engine, workspace, person, f"signal.{body.action}", f"signal:{signal_id}")
+    return result
+
+
+@router.post("/workspaces/{workspace}/monitor", status_code=202)
+def start_monitoring(
+    workspace: str,
+    background: BackgroundTasks,
+    engine: Engine = Depends(engine_dep),
+    llm: LLM = Depends(llm_dep),
+) -> dict:
+    """Run the competitor, SEO and social monitors now. Findings arrive in the inbox."""
+    guard(lambda: load_brain(workspace))
+    guard(lambda: budget.check(engine, workspace))
+    background.add_task(run_monitors, llm, engine, workspace, WORKSPACES_DIR)
+    return {"workspace": workspace, "status": "started"}
+
+
+@router.get("/workspaces/{workspace}/rankings")
+def keyword_ranking(workspace: str, keyword: str, engine: Engine = Depends(engine_dep)) -> list:
+    """A keyword's position over time, from Search Console exports."""
+    return ranking_history(engine, workspace, keyword)
+
+
+# --- ad images and landing pages ---
+
+# Progress of ad-image jobs started from the review panel, by draft id. One process only;
+# the job queue in Phase 9 replaces this.
+CREATIVE_JOBS: dict[int, dict] = {}
+
+
+def _make_creatives(llm: LLM, engine: Engine, draft_id: int, root: Path) -> None:
+    CREATIVE_JOBS[draft_id] = {"status": "running", "detail": ""}
+    try:
+        with Session(engine) as session:
+            draft = session.get(Draft, draft_id)
+        brand = load_brain(draft.workspace, root=root)
+        with renderer() as browser:
+            agent = creative.CreativeAgent(llm, engine, browser, root, image_generator())
+            result = agent.run(draft, brand)
+        rounds = len(result.rounds)
+        CREATIVE_JOBS[draft_id] = {
+            "status": "done",
+            "detail": f"{'Passed' if result.passed else 'Did not pass'} the vision critic "
+            f"after {rounds} round{'s' if rounds != 1 else ''}",
+        }
+    except Exception as exc:  # noqa: BLE001 — the panel shows the reason
+        CREATIVE_JOBS[draft_id] = {"status": "failed", "detail": f"{type(exc).__name__}: {exc}"}
+
+
+@router.post("/drafts/{draft_id}/creatives", status_code=202)
+def start_creatives(
+    draft_id: int,
+    background: BackgroundTasks,
+    engine: Engine = Depends(engine_dep),
+    llm: LLM = Depends(llm_dep),
+) -> dict:
+    """Render this ad in three sizes and put it through the vision critic."""
+    with Session(engine) as session:
+        draft = session.get(Draft, draft_id)
+    if draft.content_type != "ad":
+        raise HTTPException(400, "Ad images are made from ad drafts only")
+    if draft.status == "rejected":
+        raise HTTPException(409, "This ad was rejected")
+    if CREATIVE_JOBS.get(draft_id, {}).get("status") == "running":
+        raise HTTPException(409, "Images for this ad are already being made")
+    guard(lambda: budget.check(engine, draft.workspace))
+    CREATIVE_JOBS[draft_id] = {"status": "running", "detail": ""}
+    background.add_task(_make_creatives, llm, engine, draft_id, WORKSPACES_DIR)
+    return {"draft_id": draft_id, "status": "running"}
+
+
+@router.get("/drafts/{draft_id}/creatives")
+def get_creatives(draft_id: int, engine: Engine = Depends(engine_dep)) -> dict:
+    """The latest ad images with the critic's scores and fixes and the measured checks."""
+    return creative.latest(engine, draft_id) | {
+        "job": CREATIVE_JOBS.get(draft_id, {"status": "idle", "detail": ""})
+    }
+
+
+@router.get("/drafts/{draft_id}/creatives/{size}.png")
+def creative_image(
+    draft_id: int,
+    size: str,
+    round: int | None = None,
+    download: bool = False,
+    engine: Engine = Depends(engine_dep),
+):
+    """One rendered size. Viewing is for review; downloading for use needs an approved ad."""
+    if size not in SIZES:
+        raise HTTPException(404, "Unknown size")
+    with Session(engine) as session:
+        draft = session.get(Draft, draft_id)
+        query = select(Creative).where(Creative.draft_id == draft_id, Creative.size == size)
+        if round is not None:
+            query = query.where(Creative.round == round)
+        row = session.exec(query.order_by(Creative.round.desc())).first()
+    if row is None:
+        raise HTTPException(404, "No image for this size yet")
+    if download:
+        guard(lambda: require_approved(draft))
+    path = (WORKSPACES_DIR / row.path).resolve()
+    if WORKSPACES_DIR.resolve() not in path.parents or not path.exists():
+        raise HTTPException(404, "Image file not found")
+    headers = (
+        {"Content-Disposition": f'attachment; filename="{draft.piece_id}-{size}.png"'}
+        if download
+        else None
+    )
+    return FileResponse(path, media_type="image/png", headers=headers)
+
+
+@router.get("/drafts/{draft_id}/landing.html", response_class=HTMLResponse)
+def landing_preview(draft_id: int, engine: Engine = Depends(engine_dep)) -> HTMLResponse:
+    """A landing hero rendered as HTML, for review. Scripts cannot run in it."""
+    with Session(engine) as session:
+        draft = session.get(Draft, draft_id)
+    if draft.content_type != "landing_hero":
+        raise HTTPException(400, "Only landing hero drafts have a page")
+    brand = guard(lambda: load_brain(draft.workspace))
+    html, problems = guard(lambda: landing_html(draft, brand, WORKSPACES_DIR))
+    return HTMLResponse(
+        html,
+        headers={
+            "Content-Security-Policy": "sandbox; default-src 'none'; img-src data:; "
+            "style-src 'unsafe-inline'",
+            "X-Accessibility-Problems": "; ".join(problems)[:500],
+        },
+    )
+
+
+@router.post("/drafts/{draft_id}/landing/export")
+def export_landing(draft_id: int, engine: Engine = Depends(engine_dep)) -> dict:
+    """Write each approved angle of this landing hero to its own HTML file for an A/B test."""
+    with Session(engine) as session:
+        draft = session.get(Draft, draft_id)
+    brand = guard(lambda: load_brain(draft.workspace))
+    paths = guard(lambda: export_variants(engine, draft_id, brand, WORKSPACES_DIR))
+    return {"files": [str(path.relative_to(WORKSPACES_DIR)) for path in paths]}
+
+
+@router.post("/workspaces/{workspace}/brand/images")
+async def upload_brand_image(
+    workspace: str,
+    request: Request,
+    name: str,
+    alt: str = "",
+    logo: bool = False,
+    engine: Engine = Depends(engine_dep),
+) -> dict:
+    """Add a logo or product photo to the brand kit. The body is the image's bytes.
+
+    Saved as a new brain version; a person adding it confirms the brand kit field.
+    """
+    data = await request.body()
+    stored = guard(lambda: save_brand_image(workspace, name, data, WORKSPACES_DIR))
+    brain = guard(lambda: load_brain(workspace, root=WORKSPACES_DIR))
+    kit = brain.brand_kit.model_dump(mode="json")
+    if logo:
+        kit["logo_file"] = stored
+    else:
+        kit["product_images"].append({"file": stored, "alt": alt.strip()})
+    guard(lambda: update_field(workspace, "brand_kit", kit, root=WORKSPACES_DIR, engine=engine))
+    return {"file": stored, "brand_kit": kit}
+
+
+# --- synthetic panel ---
+
+
+@router.get("/workspaces/{workspace}/panel")
+def panel_summary(workspace: str, engine: Engine = Depends(engine_dep)) -> dict:
+    """The panel's personas and its record against real test results."""
+    people = panel_personas.panel(engine, workspace)
+    return {
+        "accuracy": panel_calibration.accuracy(engine, workspace),
+        "generation": people[0].generation if people else 0,
+        "personas": [
+            {"name": p.name, **json.loads(p.profile), "support": json.loads(p.support)}
+            for p in people
+        ],
+    }
+
+
+@router.get("/drafts/{draft_id}/panel")
+def draft_panel(draft_id: int, engine: Engine = Depends(engine_dep)) -> dict:
+    """The panel's pre-test of the experiment this draft belongs to, if there was one."""
+    with Session(engine) as session:
+        draft = session.get(Draft, draft_id)
+        base = _base_id(draft)
+        run = session.exec(
+            select(PanelRun)
+            .where(PanelRun.cycle_id == draft.cycle_id, PanelRun.experiment == base)
+            .order_by(PanelRun.created_at.desc())
+        ).first()
+    if run is None:
+        return {"experiment": base, "ran": False}
+    return {
+        "experiment": base,
+        "ran": True,
+        "trust": run.trust,
+        "prediction": json.loads(run.prediction),
+        "recommendation": json.loads(run.recommendation),
+        "accuracy_message": panel_calibration.accuracy(engine, draft.workspace)["message"],
+    }
+
+
+# --- connectors and MCP approvals ---
+
+
+def _person(request: Request) -> str:
+    user = auth.current_user(request)
+    return user.email if user else "unknown"
+
+
+@router.get("/workspaces/{workspace}/connectors")
+def list_connectors(workspace: str, engine: Engine = Depends(engine_dep)) -> list[dict]:
+    """Which sources are connected and when they last synced. Secrets are never returned."""
+    return connector_store.status(engine, workspace)
+
+
+class ConnectorIn(BaseModel):
+    api_key: str | None = None
+    settings: dict = {}
+
+
+@router.put("/workspaces/{workspace}/connectors/{provider}")
+def save_connector(
+    workspace: str,
+    provider: str,
+    body: ConnectorIn,
+    request: Request,
+    engine: Engine = Depends(engine_dep),
+) -> list[dict]:
+    """Store an API key (encrypted) and settings for a source."""
+    if provider == "google" and body.api_key:
+        raise HTTPException(400, "Google is connected by signing in, not with a key")
+    if provider == "mcp":
+        if "url" in body.settings:
+            try:
+                check_url(str(body.settings["url"]))
+            except (ValueError, BlockedAddress) as exc:
+                raise HTTPException(400, str(exc)) from exc
+        if body.settings.get("source", "ga4") not in SOURCES:
+            raise HTTPException(400, f"source must be one of: {', '.join(SOURCES)}")
+    secret = {"api_key": body.api_key.strip()} if body.api_key else None
+    if provider == "mcp" and secret is None:
+        secret = {}
+    guard(lambda: connector_store.save(engine, workspace, provider, _person(request),
+                                       secret=secret, settings=body.settings or None))  # fmt: skip
+    audit.record(
+        engine,
+        workspace,
+        _person(request),
+        "connector.saved",
+        provider,
+        key_changed=secret is not None and bool(secret),
+        settings=body.settings,
+    )
+    return connector_store.status(engine, workspace)
+
+
+@router.delete("/workspaces/{workspace}/connectors/{provider}")
+def delete_connector(
+    workspace: str, provider: str, request: Request, engine: Engine = Depends(engine_dep)
+) -> list:
+    connector_store.remove(engine, workspace, provider)
+    audit.record(engine, workspace, _person(request), "connector.removed", provider)
+    return connector_store.status(engine, workspace)
+
+
+@router.post("/workspaces/{workspace}/connectors/google/start")
+def start_google(workspace: str, request: Request) -> dict:
+    """The Google sign-in URL for read-only Search Console and GA4 access."""
+    url = guard(lambda: google_connector.authorization_url(workspace, _person(request)))
+    return {"url": url}
+
+
+@router.get("/connectors/google/callback")
+def google_callback(
+    code: str = "", state: str = "", error: str = "", engine: Engine = Depends(engine_dep)
+):
+    """Where Google sends the person back. The signed state says which workspace and who."""
+    import httpx
+
+    target = "/settings?connected=google#sources"
+    if error or not code:
+        return RedirectResponse(f"/settings?error={error or 'cancelled'}#sources")
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            google_connector.finish(engine, code, state, client)
+    except Exception as exc:  # noqa: BLE001 — shown on the Settings page, not as a stack trace
+        reason = str(exc).replace("\n", " ")[:200]
+        return RedirectResponse(f"/settings?error={reason}#sources")
+    return RedirectResponse(target)
+
+
+@router.post("/workspaces/{workspace}/connectors/sync", status_code=202)
+def sync_now(
+    workspace: str, background: BackgroundTasks, engine: Engine = Depends(engine_dep)
+) -> dict:
+    """Pull fresh metrics from every connected source now."""
+    background.add_task(sync_workspace, engine, workspace, WORKSPACES_DIR)
+    return {"workspace": workspace, "status": "started"}
+
+
+class ApprovalIn(BaseModel):
+    action: str
+
+
+@router.post("/workspaces/{workspace}/mcp/approvals")
+def mcp_approval(
+    workspace: str, body: ApprovalIn, request: Request, engine: Engine = Depends(engine_dep)
+) -> dict:
+    """A single-use token that lets an MCP client do one action here in the next 15 minutes."""
+    from growthcrew.mcp_server import TOKEN_TTL, mint_approval
+
+    token = guard(lambda: mint_approval(workspace, body.action, _person(request)))
+    audit.record(engine, workspace, _person(request), "mcp.approval_minted", body.action)
+    return {"token": token, "expires_in": TOKEN_TTL, "action": body.action}
+
+
+# --- tracing and agent limits ---
+
+
+@router.get("/cycles/{cycle_id}/trace")
+def cycle_trace(cycle_id: int, engine: Engine = Depends(engine_dep)) -> dict:
+    """The cycle's trace: stages, model calls and tool calls with tokens, cost and latency."""
+    with Session(engine) as session:
+        cycle = session.get(Cycle, cycle_id)
+    if not cycle.trace_id:
+        return {"trace_id": "", "spans": []}
+    return {"trace_id": cycle.trace_id, "spans": tracing.tree(engine, cycle.trace_id)}
+
+
+@router.get("/cycles/{cycle_id}/trace.otlp.json")
+def cycle_trace_otlp(cycle_id: int, engine: Engine = Depends(engine_dep)) -> dict:
+    """The same trace in OTLP/JSON, to load into Jaeger, Tempo, Langfuse or a collector."""
+    with Session(engine) as session:
+        cycle = session.get(Cycle, cycle_id)
+    return tracing.otlp(engine, cycle.trace_id) if cycle.trace_id else {"resourceSpans": []}
+
+
+@router.get("/costs/agents")
+def agent_limits(days: int = 7, engine: Engine = Depends(engine_dep)) -> list[dict]:
+    """Per agent: calls, mean and p95 cost and latency against their limits (admin only)."""
+    return budgets.report(engine, days)
+
+
+# --- members, roles, audit log and the kill switch ---
+
+
+class MemberIn(BaseModel):
+    email: str
+    role: str
+
+
+@router.get("/workspaces/{workspace}/members")
+def list_members(workspace: str, engine: Engine = Depends(engine_dep)) -> list[dict]:
+    with Session(engine) as session:
+        users = session.exec(select(User)).all()
+    return [{"email": u.email, "role": u.role_in(workspace)} for u in users
+            if not u.is_admin and u.can_access(workspace)]  # fmt: skip
+
+
+@router.put("/workspaces/{workspace}/members")
+def set_member(
+    workspace: str, body: MemberIn, request: Request, engine: Engine = Depends(engine_dep)
+) -> list[dict]:
+    """Give an existing user a role here: owner, approver or viewer. Owners only."""
+    if body.role not in auth.ROLES:
+        raise HTTPException(400, f"role must be one of: {', '.join(auth.ROLES)}")
+    with Session(engine) as session:
+        user = session.exec(select(User).where(User.email == body.email.strip().lower())).first()
+        if user is None:
+            raise HTTPException(404, "No user with that email; add them with `growthcrew user add`")
+        roles = json.loads(user.roles or "{}") | {workspace: body.role}
+        user.roles = json.dumps(roles)
+        if not user.can_access(workspace):
+            user.workspaces = ",".join(filter(None, [*user.workspaces.split(","), workspace]))
+        session.add(user)
+        session.commit()
+    audit.record(engine, workspace, _person(request), "member.role", body.email, role=body.role)
+    return list_members(workspace, engine)
+
+
+@router.get("/workspaces/{workspace}/audit")
+def audit_log(workspace: str, engine: Engine = Depends(engine_dep)) -> list[dict]:
+    """Every approval, edit, publish and access change here, newest first."""
+    return audit.entries(engine, workspace)
+
+
+class PauseIn(BaseModel):
+    paused: bool
+
+
+@router.post("/workspaces/{workspace}/pause")
+def pause_workspace(
+    workspace: str, body: PauseIn, request: Request, engine: Engine = Depends(engine_dep)
+) -> dict:
+    """The kill switch for one workspace: no agent makes a model call while it is on."""
+    safety.set_paused(engine, body.paused, _person(request), workspace)
+    audit.record(engine, workspace, _person(request), "agents.paused" if body.paused
+                 else "agents.resumed")  # fmt: skip
+    return {"workspace": workspace, "paused": safety.paused(engine, workspace)}
+
+
+@router.post("/settings/pause")
+def pause_everything(body: PauseIn, request: Request, engine: Engine = Depends(engine_dep)) -> dict:
+    """The kill switch for every workspace (admins only)."""
+    safety.set_paused(engine, body.paused, _person(request))
+    audit.record(engine, "*", _person(request), "agents.paused_all" if body.paused
+                 else "agents.resumed_all")  # fmt: skip
+    return {"paused": safety.paused(engine)}
+
+
+@router.get("/workspaces/{workspace}/pause")
+def pause_state(workspace: str, engine: Engine = Depends(engine_dep)) -> dict:
+    return {"workspace": workspace, "paused": safety.paused(engine, workspace)}

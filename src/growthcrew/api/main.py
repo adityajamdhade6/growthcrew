@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -11,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import Engine, func
 from sqlmodel import Session, select
 
-from growthcrew import budget, workflow
+from growthcrew import budget, jobs, observability, safety, workflow
 from growthcrew.agents.analyst import AnalystAgent
 from growthcrew.agents.learning_models import WeeklyLearnings
 from growthcrew.agents.orchestrator import Orchestrator, recover_interrupted, timeline
@@ -28,6 +29,7 @@ from growthcrew.api.deps import (  # noqa: F401  (re-exported for dependency ove
     templates,
 )
 from growthcrew.api.ui import router as ui_router
+from growthcrew.api.ux import router as ux_router
 from growthcrew.db.models import (
     Alert,
     Approval,
@@ -35,6 +37,7 @@ from growthcrew.db.models import (
     Cycle,
     Draft,
     GuardrailBlock,
+    Job,
     LLMCall,
 )
 from growthcrew.integrations.export import calendar_csv, email_draft
@@ -45,6 +48,8 @@ from growthcrew.reports.learning_log import learning_log
 # Every route requires a signed-in user with access to the workspace involved.
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    safety.install_scrubber()
+    observability.init_error_tracking()
     engine = engine_dep()
     recover_interrupted(engine)
     if os.getenv("GROWTHCREW_DEMO") == "1":
@@ -58,6 +63,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="GrowthCrew", dependencies=[Depends(authorize)], lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(ui_router)
+app.include_router(ux_router)
 _templates = templates
 _guard = guard
 
@@ -90,8 +96,16 @@ class BudgetIn(BaseModel):
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health(engine: Engine = Depends(engine_dep)) -> dict:
+    """Liveness and readiness: the database answers, and how many jobs are waiting."""
+    try:
+        with Session(engine) as session:
+            queued = session.exec(select(func.count(Job.id)).where(Job.status == "queued")).one()
+            dead = session.exec(select(func.count(Job.id)).where(Job.status == "dead")).one()
+    except Exception as exc:  # noqa: BLE001 — reported as unhealthy, not raised
+        raise HTTPException(503, f"database unavailable: {type(exc).__name__}") from exc
+    return {"status": "ok", "database": engine.dialect.name, "jobs_queued": queued,
+            "jobs_dead": dead}  # fmt: skip
 
 
 @app.get("/costs")
@@ -126,9 +140,17 @@ def start_cycle(
     background: BackgroundTasks,
     orchestrator: Orchestrator = Depends(orchestrator_dep),
 ) -> Cycle:
-    """Start this week's cycle. It runs in the background up to the approval stage."""
+    """Start this week's cycle. It runs in the background up to the approval stage.
+
+    With GROWTHCREW_QUEUE=1 it goes to the durable job queue, where a worker runs it and a
+    crash resumes it; otherwise it runs inside the API process (development).
+    """
     cycle = orchestrator.start_cycle(workspace)
-    background.add_task(orchestrator.run, cycle.id)
+    if os.getenv("GROWTHCREW_QUEUE") == "1":
+        jobs.enqueue(orchestrator.engine, "weekly_cycle", f"cycle:{cycle.id}", workspace,
+                     {"cycle_id": cycle.id})  # fmt: skip
+    else:
+        background.add_task(orchestrator.run, cycle.id)
     return cycle
 
 
@@ -139,7 +161,16 @@ def resume_cycle(
     orchestrator: Orchestrator = Depends(orchestrator_dep),
 ) -> dict:
     """Continue a halted cycle, for example after raising the budget."""
-    background.add_task(orchestrator.run, cycle_id)
+    if os.getenv("GROWTHCREW_QUEUE") == "1":
+        jobs.enqueue(
+            orchestrator.engine,
+            "weekly_cycle",
+            f"cycle:{cycle_id}:resume:{int(time.time())}",
+            "",
+            {"cycle_id": cycle_id},
+        )
+    else:
+        background.add_task(orchestrator.run, cycle_id)
     return {"cycle_id": cycle_id, "status": "resuming"}
 
 
@@ -190,7 +221,7 @@ def decide(
             engine, draft_id, body.decision, reviewer, body.comment, body.edited_text
         )
     )
-    return {"approval": approval, "voice_rules_learned": learned}
+    return {"approval": approval, "voice_rules_proposed": learned}
 
 
 @app.get("/drafts/{draft_id}/text")

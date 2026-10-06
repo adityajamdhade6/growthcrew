@@ -13,6 +13,14 @@ eval:
 eval-live:
 	uv run python -m evals.run --live $(if $(LIMIT),--limit $(LIMIT),)
 
+# The model-routing experiment (cheaper drafting models vs default). Costs money.
+eval-routing:
+	uv run python -m evals.routing $(if $(LIMIT),--limit $(LIMIT),)
+
+# The CI gate: compare the scorecard with evals/baseline.json.
+eval-gate:
+	uv run python -m evals.gate
+
 # Everything in Docker, with the sample brand loaded: http://localhost:3000
 up:
 	docker compose up --build

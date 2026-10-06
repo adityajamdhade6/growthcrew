@@ -130,7 +130,8 @@ significance test.
 ## Limits
 
 - One look. The rule is validated for a single judgement at the planned sample. It is not a
-  sequential test, so it cannot stop a test early on overwhelming evidence.
+  sequential test, so it cannot stop a test early on overwhelming evidence. That matters
+  most for low-traffic B2B tests; sequential stopping is on the [roadmap](roadmap.md).
 - The bandit assumes rates do not drift. If an ad fatigues, last month's winner may no longer
   be the best, and nothing here detects that.
 - Guardrails compare the winner with the control only.
