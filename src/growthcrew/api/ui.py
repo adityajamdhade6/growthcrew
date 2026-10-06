@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import Engine, func
 from sqlmodel import Session, select
 
-from growthcrew import budget, budgets, config, tracing
+from growthcrew import audit, budget, budgets, config, safety, tracing
 from growthcrew.agents.orchestrator import timeline
 from growthcrew.agents.research import load_latest_research
 from growthcrew.agents.strategist import SECTIONS, StrategistAgent, load_latest_strategy
@@ -49,6 +49,7 @@ from growthcrew.db.models import (
     RoleModel,
     Signal,
     StrategyComment,
+    User,
 )
 from growthcrew.llm import LLM
 from growthcrew.memory import playbook
@@ -539,7 +540,11 @@ def decide_signal(
         if signal is None:
             raise HTTPException(404, "Signal not found")
         workspace = signal.workspace
-    return guard(lambda: monitor_signals.decide(engine, workspace, signal_id, body.action, person))
+    result = guard(
+        lambda: monitor_signals.decide(engine, workspace, signal_id, body.action, person)
+    )
+    audit.record(engine, workspace, person, f"signal.{body.action}", f"signal:{signal_id}")
+    return result
 
 
 @router.post("/workspaces/{workspace}/monitor", status_code=202)
@@ -787,12 +792,24 @@ def save_connector(
         secret = {}
     guard(lambda: connector_store.save(engine, workspace, provider, _person(request),
                                        secret=secret, settings=body.settings or None))  # fmt: skip
+    audit.record(
+        engine,
+        workspace,
+        _person(request),
+        "connector.saved",
+        provider,
+        key_changed=secret is not None and bool(secret),
+        settings=body.settings,
+    )
     return connector_store.status(engine, workspace)
 
 
 @router.delete("/workspaces/{workspace}/connectors/{provider}")
-def delete_connector(workspace: str, provider: str, engine: Engine = Depends(engine_dep)) -> list:
+def delete_connector(
+    workspace: str, provider: str, request: Request, engine: Engine = Depends(engine_dep)
+) -> list:
     connector_store.remove(engine, workspace, provider)
+    audit.record(engine, workspace, _person(request), "connector.removed", provider)
     return connector_store.status(engine, workspace)
 
 
@@ -836,11 +853,14 @@ class ApprovalIn(BaseModel):
 
 
 @router.post("/workspaces/{workspace}/mcp/approvals")
-def mcp_approval(workspace: str, body: ApprovalIn, request: Request) -> dict:
+def mcp_approval(
+    workspace: str, body: ApprovalIn, request: Request, engine: Engine = Depends(engine_dep)
+) -> dict:
     """A single-use token that lets an MCP client do one action here in the next 15 minutes."""
     from growthcrew.mcp_server import TOKEN_TTL, mint_approval
 
     token = guard(lambda: mint_approval(workspace, body.action, _person(request)))
+    audit.record(engine, workspace, _person(request), "mcp.approval_minted", body.action)
     return {"token": token, "expires_in": TOKEN_TTL, "action": body.action}
 
 
@@ -869,3 +889,75 @@ def cycle_trace_otlp(cycle_id: int, engine: Engine = Depends(engine_dep)) -> dic
 def agent_limits(days: int = 7, engine: Engine = Depends(engine_dep)) -> list[dict]:
     """Per agent: calls, mean and p95 cost and latency against their limits (admin only)."""
     return budgets.report(engine, days)
+
+
+# --- members, roles, audit log and the kill switch ---
+
+
+class MemberIn(BaseModel):
+    email: str
+    role: str
+
+
+@router.get("/workspaces/{workspace}/members")
+def list_members(workspace: str, engine: Engine = Depends(engine_dep)) -> list[dict]:
+    with Session(engine) as session:
+        users = session.exec(select(User)).all()
+    return [{"email": u.email, "role": u.role_in(workspace)} for u in users
+            if not u.is_admin and u.can_access(workspace)]  # fmt: skip
+
+
+@router.put("/workspaces/{workspace}/members")
+def set_member(
+    workspace: str, body: MemberIn, request: Request, engine: Engine = Depends(engine_dep)
+) -> list[dict]:
+    """Give an existing user a role here: owner, approver or viewer. Owners only."""
+    if body.role not in auth.ROLES:
+        raise HTTPException(400, f"role must be one of: {', '.join(auth.ROLES)}")
+    with Session(engine) as session:
+        user = session.exec(select(User).where(User.email == body.email.strip().lower())).first()
+        if user is None:
+            raise HTTPException(404, "No user with that email; add them with `growthcrew user add`")
+        roles = json.loads(user.roles or "{}") | {workspace: body.role}
+        user.roles = json.dumps(roles)
+        if not user.can_access(workspace):
+            user.workspaces = ",".join(filter(None, [*user.workspaces.split(","), workspace]))
+        session.add(user)
+        session.commit()
+    audit.record(engine, workspace, _person(request), "member.role", body.email, role=body.role)
+    return list_members(workspace, engine)
+
+
+@router.get("/workspaces/{workspace}/audit")
+def audit_log(workspace: str, engine: Engine = Depends(engine_dep)) -> list[dict]:
+    """Every approval, edit, publish and access change here, newest first."""
+    return audit.entries(engine, workspace)
+
+
+class PauseIn(BaseModel):
+    paused: bool
+
+
+@router.post("/workspaces/{workspace}/pause")
+def pause_workspace(
+    workspace: str, body: PauseIn, request: Request, engine: Engine = Depends(engine_dep)
+) -> dict:
+    """The kill switch for one workspace: no agent makes a model call while it is on."""
+    safety.set_paused(engine, body.paused, _person(request), workspace)
+    audit.record(engine, workspace, _person(request), "agents.paused" if body.paused
+                 else "agents.resumed")  # fmt: skip
+    return {"workspace": workspace, "paused": safety.paused(engine, workspace)}
+
+
+@router.post("/settings/pause")
+def pause_everything(body: PauseIn, request: Request, engine: Engine = Depends(engine_dep)) -> dict:
+    """The kill switch for every workspace (admins only)."""
+    safety.set_paused(engine, body.paused, _person(request))
+    audit.record(engine, "*", _person(request), "agents.paused_all" if body.paused
+                 else "agents.resumed_all")  # fmt: skip
+    return {"paused": safety.paused(engine)}
+
+
+@router.get("/workspaces/{workspace}/pause")
+def pause_state(workspace: str, engine: Engine = Depends(engine_dep)) -> dict:
+    return {"workspace": workspace, "paused": safety.paused(engine, workspace)}

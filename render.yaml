@@ -1,8 +1,27 @@
-# Render blueprint for a public demo: sample brand pre-loaded, no API key, hard spending cap.
+# Render blueprint: Postgres, the API, a worker for queued jobs, and the web app.
+# The public demo runs with the sample brand pre-loaded, no API key and a hard spending cap.
 # Not yet deployed. To use it: push this repo to GitHub, then in Render choose
 # New > Blueprint and select the repo. Set the web service's GROWTHCREW_API_URL build
 # argument to the API service's internal address once Render has assigned it.
+databases:
+  - name: growthcrew-db
+    # pgvector is available on Render Postgres; migrations create the extension.
+    plan: basic-256mb
+
 services:
+  - type: worker
+    name: growthcrew-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: growthcrew worker
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase: {name: growthcrew-db, property: connectionString}
+      - key: GROWTHCREW_MIGRATIONS
+        value: alembic
+      - key: GROWTHCREW_SECRET
+        fromService: {type: web, name: growthcrew-api, envVarKey: GROWTHCREW_SECRET}
+
   - type: web
     name: growthcrew-api
     runtime: docker
@@ -13,6 +32,12 @@ services:
       mountPath: /data
       sizeGB: 1
     envVars:
+      - key: DATABASE_URL
+        fromDatabase: {name: growthcrew-db, property: connectionString}
+      - key: GROWTHCREW_MIGRATIONS
+        value: alembic
+      - key: GROWTHCREW_QUEUE
+        value: "1"
       - key: GROWTHCREW_DEMO
         value: "1"
       # The demo has no ANTHROPIC_API_KEY, so it cannot spend. If you add one, this cap

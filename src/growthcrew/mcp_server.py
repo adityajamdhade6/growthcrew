@@ -21,7 +21,7 @@ from sqlalchemy import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, func, select
 
-from growthcrew import keys
+from growthcrew import audit, keys
 from growthcrew.agents.strategist import load_latest_strategy
 from growthcrew.analytics.analysis import analyze
 from growthcrew.brain.store import WORKSPACES_DIR, list_versions, load_brain
@@ -70,6 +70,7 @@ def spend_approval(engine: Engine, token: str, workspace: str, action: str) -> s
             session.commit()
     except IntegrityError as exc:
         raise AccessDenied("This approval token has already been used") from exc
+    audit.record(engine, workspace, payload["person"], "mcp.approval_spent", action)
     return payload["person"]
 
 

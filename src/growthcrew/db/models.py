@@ -34,6 +34,8 @@ class LLMCall(SQLModel, table=True):
     # The trace and span this call belongs to, when it ran inside a traced cycle.
     trace_id: str = Field(default="", index=True)
     span_id: str = ""
+    # True when the response came from the cache of a resumed job: no tokens were paid for.
+    cached: bool = False
 
 
 class BrainVersion(SQLModel, table=True):
@@ -273,10 +275,23 @@ class User(SQLModel, table=True):
     password_hash: str
     # Comma-separated workspace names, or "*" for every workspace (admin).
     workspaces: str = ""
+    # Role per workspace as JSON, {"acme": "approver"}: owner, approver or viewer. A workspace
+    # listed above with no role here is owned.
+    roles: str = "{}"
     created_at: datetime = Field(default_factory=_now)
 
     def can_access(self, workspace: str) -> bool:
         return self.is_admin or workspace in self.workspaces.split(",")
+
+    def role_in(self, workspace: str) -> str | None:
+        """owner, approver or viewer in this workspace; None without access."""
+        if self.is_admin:
+            return "owner"
+        if not self.can_access(workspace):
+            return None
+        import json
+
+        return json.loads(self.roles or "{}").get(workspace, "owner")
 
     @property
     def is_admin(self) -> bool:
@@ -595,3 +610,61 @@ class Span(SQLModel, table=True):
     status: str = "ok"
     # Tokens, cost, model, stage detail, as JSON.
     attributes: str = "{}"
+
+
+class Job(SQLModel, table=True):
+    """Durable background work: claimed with a lease, retried with backoff, resumable."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    kind: str = Field(index=True)
+    workspace: str = Field(default="", index=True)
+    payload: str = "{}"
+    # Enqueuing the same key twice returns the first job: re-sending is safe.
+    idempotency_key: str = Field(unique=True, index=True)
+    # queued, running, done, dead
+    status: str = Field(default="queued", index=True)
+    attempts: int = 0
+    max_attempts: int = 5
+    run_after: datetime = Field(default_factory=_now, index=True)
+    lease_until: datetime | None = Field(default=None, index=True)
+    worker: str = ""
+    last_error: str = ""
+    result: str = ""
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class LLMCache(SQLModel, table=True):
+    """A model response kept by the hash of its request, so a resumed job does not pay twice."""
+
+    key: str = Field(primary_key=True)
+    namespace: str = Field(index=True)
+    created_at: datetime = Field(default_factory=_now)
+    response: str
+
+
+class AuditLog(SQLModel, table=True):
+    """Append-only record of every approval, edit, publish and access change.
+
+    Each row carries the hash of the one before it, so a removed or altered row breaks the
+    chain; the database refuses updates and deletes on this table.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    at: datetime = Field(default_factory=_now, index=True)
+    workspace: str = Field(default="", index=True)
+    actor: str
+    action: str = Field(index=True)
+    target: str = ""
+    detail: str = "{}"
+    prev_hash: str = ""
+    hash: str = ""
+
+
+class SystemFlag(SQLModel, table=True):
+    """Switches set by a person, such as the kill switch that pauses all agents."""
+
+    key: str = Field(primary_key=True)
+    value: str
+    set_by: str
+    set_at: datetime = Field(default_factory=_now)

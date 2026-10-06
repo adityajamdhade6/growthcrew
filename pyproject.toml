@@ -24,7 +24,14 @@ dependencies = [
     "pillow>=12.3.0",
     "mcp>=2.3.0",
     "cryptography>=50.0.2",
+    "alembic>=1.20.0",
+    "psycopg[binary]>=3.3.6",
+    "pgvector>=0.5.0",
 ]
+
+[project.optional-dependencies]
+# Error tracking: set SENTRY_DSN and install with `uv sync --extra ops`.
+ops = ["sentry-sdk"]
 
 [project.scripts]
 growthcrew = "growthcrew.cli:run"

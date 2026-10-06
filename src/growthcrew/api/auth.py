@@ -6,15 +6,18 @@ Users are created from the command line (`growthcrew user add`); there is no ope
 import base64
 import hashlib
 import hmac
+import os
+import re
 import secrets
 import time
+from collections import deque
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
-from growthcrew import keys
+from growthcrew import keys, tenancy
 from growthcrew.api.deps import engine_dep
 from growthcrew.db.models import CalendarItem, Cycle, Draft, Signal, User
 
@@ -97,8 +100,38 @@ def grant(engine: Engine, user: User, workspace: str) -> None:
         session.commit()
 
 
-def authorize(request: Request, engine: Engine = Depends(engine_dep)) -> None:
-    """Applied to every route: require a valid token and access to the workspace involved."""
+ROLES = ("viewer", "approver", "owner")
+# Changes only a workspace's owner may make: who can do what, where data comes from, money.
+OWNER_ONLY = re.compile(
+    r"^/workspaces/[^/]+/(connectors|budget|brain|brand|mcp|pause|members)(/|$)"
+)
+# Requests per user per minute before the API answers 429.
+RATE_LIMIT = int(os.getenv("GROWTHCREW_RATE_LIMIT", "300"))
+_requests: dict[int, deque] = {}
+
+
+def _rate_limited(user_id: int) -> bool:
+    now = time.monotonic()
+    window = _requests.setdefault(user_id, deque())
+    while window and now - window[0] > 60:
+        window.popleft()
+    if len(window) >= RATE_LIMIT:
+        return True
+    window.append(now)
+    return False
+
+
+def required_role(method: str, path: str) -> str:
+    if method in ("GET", "HEAD", "OPTIONS"):
+        return "viewer"
+    return "owner" if OWNER_ONLY.match(path) else "approver"
+
+
+async def authorize(request: Request, engine: Engine = Depends(engine_dep)) -> None:
+    """Applied to every route: a valid token, access to the workspace involved, a role that
+    allows the action, and a request rate under the limit. Every query the route then makes
+    is confined to that workspace (`tenancy`), so a route cannot read another client's rows
+    even by mistake. Async so the tenant it sets carries into the route."""
     path = request.url.path
     if path in PUBLIC_PATHS:
         return
@@ -120,7 +153,15 @@ def authorize(request: Request, engine: Engine = Depends(engine_dep)) -> None:
         raise HTTPException(403, "You do not have access to this workspace")
     if not workspace and path.startswith(ADMIN_PREFIXES) and not user.is_admin:
         raise HTTPException(403, "Only an admin can do this")
+    if workspace:
+        needed = required_role(request.method, path)
+        role = user.role_in(workspace) or "viewer"
+        if ROLES.index(role) < ROLES.index(needed):
+            raise HTTPException(403, f"This needs the {needed} role; you are a {role} here")
+    if _rate_limited(user.id):
+        raise HTTPException(429, "Too many requests. Wait a minute and try again.")
     request.state.user = user
+    tenancy.set_tenant(workspace or None)
 
 
 def current_user(request: Request) -> User | None:

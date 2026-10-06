@@ -36,7 +36,7 @@ from growthcrew.db.models import (
     Task,
 )
 from growthcrew.db.session import get_engine
-from growthcrew.llm import LLM
+from growthcrew.llm import LLM, cache_scope
 from growthcrew.memory import miner
 from growthcrew.monitor import signals as monitor_signals
 from growthcrew.monitor.run import MonitorRun, run_monitors
@@ -139,8 +139,11 @@ class Orchestrator:
                 cycle.trace_id = new_trace_id()
                 session.add(cycle)
                 session.commit()
-        with span(self.engine, f"weekly cycle {cycle_id}", "cycle", cycle.workspace,
-                  trace_id=cycle.trace_id, cycle_id=cycle_id) as attrs:  # fmt: skip
+        with (
+            span(self.engine, f"weekly cycle {cycle_id}", "cycle", cycle.workspace,
+                 trace_id=cycle.trace_id, cycle_id=cycle_id) as attrs,
+            cache_scope(f"cycle:{cycle_id}"),
+        ):  # fmt: skip
             result = self._run(cycle_id)
             attrs["stage"] = result.stage
             return result

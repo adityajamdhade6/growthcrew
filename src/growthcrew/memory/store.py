@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 
 from pydantic import BaseModel
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 from sqlmodel import Session, select
 
 from growthcrew.analytics.analysis import primary_metric
@@ -106,7 +106,15 @@ def sync(engine: Engine, workspace: str, embedder: Embedder | None = None) -> in
                 piece.score = round(piece.rate / average, 3) if average else 1.0
                 session.add(piece)
         session.commit()
-        return len(existing)
+    if engine.dialect.name == "postgresql":
+        # Mirror the embeddings into the pgvector column the nearest-neighbour index uses.
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE memorypiece SET embedding_vec = embedding::vector "
+                     "WHERE workspace = :w AND embedding_vec IS NULL AND embedding <> '[]'"),
+                {"w": workspace},
+            )  # fmt: skip
+    return len(existing)
 
 
 def pieces(
@@ -119,6 +127,25 @@ def pieces(
         query = query.where(MemoryPiece.published_on >= since)
     with Session(engine) as session:
         return list(session.exec(query.order_by(MemoryPiece.published_on)))
+
+
+def _nearest_pgvector(
+    engine: Engine, workspace: str, content_type: str, target: list[float], pool: int
+) -> list[tuple[float, MemoryPiece]]:
+    """The `pool` nearest pieces by cosine distance, found by the HNSW index in Postgres."""
+    vector = "[" + ",".join(f"{value:.6f}" for value in target) + "]"
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text("SELECT id, 1 - (embedding_vec <=> CAST(:q AS vector)) AS similarity "
+                 "FROM memorypiece WHERE workspace = :w AND content_type = :t "
+                 "AND embedding_vec IS NOT NULL ORDER BY embedding_vec <=> CAST(:q AS vector) "
+                 "LIMIT :k"),
+            {"q": vector, "w": workspace, "t": content_type, "k": pool},
+        ).all()  # fmt: skip
+    with Session(engine) as session:
+        found = {p.id: p for p in session.exec(
+            select(MemoryPiece).where(MemoryPiece.id.in_([row.id for row in rows])))}  # fmt: skip
+    return [(float(row.similarity), found[row.id]) for row in rows if row.id in found]
 
 
 def best_similar(
@@ -136,11 +163,14 @@ def best_similar(
     """
     embedder = embedder or HashingEmbedder()
     target = embedder.embed(query)
-    scored = [
-        (cosine(target, json.loads(piece.embedding)), piece)
-        for piece in pieces(engine, workspace, content_type)
-    ]
-    nearest = sorted(scored, key=lambda pair: -pair[0])[:pool]
+    if engine.dialect.name == "postgresql":
+        nearest = _nearest_pgvector(engine, workspace, content_type, target, pool)
+    else:
+        scored = [
+            (cosine(target, json.loads(piece.embedding)), piece)
+            for piece in pieces(engine, workspace, content_type)
+        ]
+        nearest = sorted(scored, key=lambda pair: -pair[0])[:pool]
     winners = sorted(nearest, key=lambda pair: -pair[1].score)[:k]
     return [
         Example(

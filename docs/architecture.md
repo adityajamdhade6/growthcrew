@@ -197,6 +197,16 @@ Text that reads like instructions to a model is flagged on the signal for the re
 - **Routing experiment** (`evals/routing.py`, `make eval-routing`). Cheaper drafting models
   against the defaults: judge score with a bootstrap interval and cost per piece, per arm.
 
+## The production backbone
+
+See [operations.md](operations.md). In short: Postgres with Alembic migrations and pgvector;
+a durable job queue (`jobs.py`) with leases, heartbeats, backoff and dead-lettering, so a
+killed worker's cycle is resumed by another; model responses cached per cycle by request hash
+(`llm.cache_scope`) so a resumed stage does not pay twice; tenant scoping of every query
+(`tenancy.py`); roles per workspace and a hash-chained, append-only audit log (`audit.py`);
+the kill switch and the log scrubber (`safety.py`); request rate limits; health checks and
+optional Sentry (`observability.py`).
+
 ## The weekly cycle
 
 ```mermaid
@@ -261,8 +271,9 @@ Two places, both local by default.
 | `creative/landing/<piece>/<angle>.html` | Exported landing page variants |
 | `pilot/` | Baseline, weekly log, tracker, reports, testimonial |
 
-**Database** (SQLite via SQLModel; `DATABASE_URL` to change it). Tables are created and new
-columns added at startup; there is no migration tool yet.
+**Database** (SQLModel; SQLite in development, Postgres 16 with pgvector in production via
+`DATABASE_URL`). Alembic migrations in `db/migrations/` (applied on start with
+`GROWTHCREW_MIGRATIONS=alembic`); development creates tables directly.
 
 | Table | Holds |
 |---|---|
@@ -282,6 +293,8 @@ columns added at startup; there is no migration tool yet.
 | `KeywordRank` | Search Console rows: each query's position, clicks and impressions by date |
 | `Creative` | Each rendered size of an ad image per critic round: slots, scores, fixes, measured checks, whether it passed, whether any image on it was AI-generated |
 | `Persona`, `PanelRun` | Synthetic personas by generation, with their evidence; each pre-test with every reaction, the predicted ranking, the advice and the trust level at the time |
+| `Job`, `LLMCache` | Queued work with leases and retries; model responses cached per cycle for resumed jobs |
+| `AuditLog`, `SystemFlag` | The hash-chained, append-only audit log; the kill switch |
 | `Span` | Trace spans: cycle, stage, model call and tool call, with timings and attributes |
 | `ConnectorCredential`, `SyncRun`, `CrmSnapshot`, `ApprovalTokenUse` | Encrypted per-workspace credentials, each sync's result, daily CRM counts, spent MCP approval tokens |
 | `Signal` | Monitor findings with their sources and dates, importance, status (new, sent, dismissed) and who decided |

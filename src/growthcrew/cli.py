@@ -113,6 +113,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("cycle", type=int)
     p.add_argument("--otlp", type=Path, help="Write the trace as OTLP/JSON to this file")
 
+    p = commands.add_parser("worker", help="Run queued jobs (weekly cycles, monitors, syncs)")
+    p.add_argument("--once", action="store_true", help="Run what is due, then stop")
+
+    p = commands.add_parser("db", help="Database migrations")
+    p.add_argument("action", choices=["upgrade", "verify-audit"])
+
+    p = commands.add_parser("pause", help="Pause or resume every agent (the kill switch)")
+    p.add_argument("state", choices=["on", "off"])
+    p.add_argument("--workspace", help="Only this workspace")
+    p.add_argument("--by", required=True, help="Who is pausing")
+
     p = commands.add_parser("cycle", help="Run this week's cycle up to the approval stage")
     p.add_argument("workspace")
     p.add_argument("--max-items", type=int, default=5)
@@ -148,6 +159,9 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
+    from growthcrew.safety import install_scrubber
+
+    install_scrubber()
 
     if args.command == "onboard":
         if args.answers:
@@ -339,6 +353,41 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote {args.otlp}")
         else:
             print(tracing.render(tracing.tree(engine, cycle.trace_id)))
+    elif args.command == "worker":
+        from growthcrew.db.session import get_engine
+        from growthcrew.jobs import default_handlers, run_worker
+
+        llm = _llm()
+        done = run_worker(get_engine(), default_handlers(llm),
+                          max_jobs=10_000 if args.once else None)  # fmt: skip
+        print(f"Ran {done} jobs")
+    elif args.command == "db":
+        from sqlmodel import create_engine
+
+        from growthcrew import audit
+        from growthcrew import config as settings
+        from growthcrew.db.session import engine_url, upgrade
+
+        engine = create_engine(engine_url(settings.DATABASE_URL))
+        if args.action == "upgrade":
+            upgrade(engine)
+            print("Database is at the latest migration")
+        else:
+            broken = audit.verify(engine)
+            print(
+                "Audit log chain intact" if broken is None else f"Audit log broken at row {broken}"
+            )
+            return 0 if broken is None else 1
+    elif args.command == "pause":
+        from growthcrew import audit, safety
+        from growthcrew.db.session import get_engine
+
+        engine = get_engine()
+        safety.set_paused(engine, args.state == "on", args.by, args.workspace)
+        audit.record(engine, args.workspace or "*", args.by,
+                     "agents.paused" if args.state == "on" else "agents.resumed")  # fmt: skip
+        print(f"Agents {'paused' if args.state == 'on' else 'resumed'} "
+              f"({args.workspace or 'all workspaces'})")  # fmt: skip
     elif args.command == "user":
         import getpass
 

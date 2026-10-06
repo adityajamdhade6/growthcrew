@@ -30,7 +30,8 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - `src/growthcrew/connectors/`: live data (Phase 7): encrypted per-workspace credentials (`store.py`), Google OAuth with Search Console and GA4 (`google.py`), Brevo newsletters and stats (`brevo.py`), HubSpot counts (`hubspot.py`), rows from other MCP servers (`mcp_source.py`), the imports folder (`imports.py`), and `sync.py`. `mcp_server.py` serves GrowthCrew over MCP; `scheduler.py` runs the daily sync and weekly analysis; `keys.py` holds signing and encryption.
 - `src/growthcrew/analytics/`: CSV ingest and piece matching (`ingest.py`), registrations and final verdicts (`registry.py`), and the weekly numbers (`analysis.py`). No model calls in this package.
 - `src/growthcrew/reports/`: Markdown and PDF rendering of agent outputs.
-- `src/growthcrew/db/`: SQLModel models and migrations.
+- `src/growthcrew/db/`: SQLModel models, the session (SQLite or Postgres with pgvector) and Alembic migrations (`db/migrations/versions/`).
+- Production backbone (Phase 9): `jobs.py` (durable queue, leases, retries), `tenancy.py` (every query scoped to its workspace), `audit.py` (hash-chained, append-only log), `safety.py` (kill switch, log scrubber), `observability.py` (Sentry), roles in `api/auth.py`. See `docs/operations.md`.
 - `evals/`: the regression suite. `golden/` (3 fictional brands x 25 requests, hard cases marked), `calibration/` (20 pieces with human scores, 50 pairs with human preferences), `suites.py` (one function per eval), `judge.py` (fixed rubrics and the position-swapped pairwise judge), `redteam.py` (attacks that must fail), `gate.py` (the CI gate against `baseline.json`), `routing.py` (model-routing experiment), `run.py` (scorecard).
 - `src/growthcrew/tracing.py` (one trace per cycle, OTLP export) and `budgets.py` (per-agent cost and latency limits with alerts).
 - `web/`: the Next.js + Tailwind app. Client components fetch through `lib/api.ts` (`/api` is proxied to FastAPI). Screens live in `app/(app)/`; shared pieces in `components/`.
@@ -78,6 +79,10 @@ Each agent has a clear role, typed inputs and outputs (pydantic), and only the t
 - Every monitor finding cites a URL and a date; a finding without one is dropped. A signal reaches the strategy only when a person sends it from the inbox, and the person recorded is the signed-in user.
 - Research claims whose URL the agent did not read, and customer quotes that are not verbatim in their source, are dropped in code. Keep it that way; do not relax it to make output look fuller.
 - The README, case study and launch copy state only what has been measured. Keep the status note, and leave pilot results and cost per piece marked as not yet measured until real numbers exist; sample or simulated figures must be labelled as such.
+- Every model change ships with an Alembic migration (`uv run alembic revision --autogenerate`); a test fails if they disagree. Never add a NOT NULL column without a server default.
+- Job handlers must be safe to run twice; long work runs through `jobs.enqueue` with an idempotency key, and model calls inside a resumable unit run in `llm.cache_scope`.
+- Never bypass `tenancy`: do not query across workspaces inside a request; cross-workspace work (admin reports, the scheduler) runs outside a tenant scope on purpose.
+- The audit log is append-only: record approvals, edits, publishes and access changes with `audit.record`, and never update or delete its rows. Owner-only routes are listed in `auth.OWNER_ONLY`.
 - Log every LLM call with tokens and cost. This happens in `llm.py`; never call the Anthropic SDK from anywhere else.
 
 ## Workflow
@@ -111,6 +116,7 @@ From the v2 upgrade pack (13 phases). They apply to every phase.
 - Weekly cycle: `uv run growthcrew cycle <workspace>` (or `POST /workspaces/<workspace>/cycles`)
 - Evals: `make eval` (offline, free) and `make eval-live [LIMIT=5]` (calls the model). Scorecard in `evals/results/`.
 - CI gate locally: `make eval && make eval-gate`; routing experiment (costs money): `make eval-routing LIMIT=6`; a cycle's trace: `uv run growthcrew trace <cycle> [--otlp file.json]`
+- Worker: `uv run growthcrew worker`; migrations: `uv run growthcrew db upgrade`; audit check: `uv run growthcrew db verify-audit`; kill switch: `uv run growthcrew pause on|off --by <name> [--workspace w]`; load test: `uv run python -m evals.loadtest --database-url <postgres>`
 - Cost dashboard: `/costs/dashboard?workspace=<workspace>`
 - Twelve simulated weeks through the pattern miner: `uv run python -c "from sqlmodel import SQLModel, create_engine; from growthcrew.db import models; from growthcrew.memory.simulate import run; e = create_engine('sqlite://'); SQLModel.metadata.create_all(e); [print(w) for w in run(e)]"`
 - Experiment engine simulation report (writes charts to `reports/experiments/`): `uv run python -m evals.experiments_report`

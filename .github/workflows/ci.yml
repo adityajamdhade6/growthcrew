@@ -52,6 +52,29 @@ jobs:
             evals/results/scorecard.*
             evals/results/pr_comment.md
 
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: growthcrew
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s
+          --health-retries 10
+    env:
+      GROWTHCREW_TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/growthcrew
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: Migrations and pgvector memory search on Postgres
+        run: uv run pytest -q tests/test_backbone.py -k "postgres or migrations"
+      - name: Load test, 20 workspaces at once (simulated agents)
+        run: uv run python -m evals.loadtest --workspaces 20 --workers 6 --database-url "$GROWTHCREW_TEST_POSTGRES_URL"
+
   web:
     runs-on: ubuntu-latest
     defaults:
