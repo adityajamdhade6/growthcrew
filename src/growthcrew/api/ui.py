@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import Engine, func
 from sqlmodel import Session, select
@@ -29,6 +29,11 @@ from growthcrew.brain.store import (
     update_field,
 )
 from growthcrew.config import AgentRole
+from growthcrew.connectors import google as google_connector
+from growthcrew.connectors import store as connector_store
+from growthcrew.connectors.mcp_source import check_url
+from growthcrew.tools.fetch import BlockedAddress
+from growthcrew.connectors.sync import sync_workspace
 from growthcrew.creative import agent as creative
 from growthcrew.creative.images import generator as image_generator
 from growthcrew.creative.kit import save_brand_image
@@ -737,3 +742,103 @@ def draft_panel(draft_id: int, engine: Engine = Depends(engine_dep)) -> dict:
         "recommendation": json.loads(run.recommendation),
         "accuracy_message": panel_calibration.accuracy(engine, draft.workspace)["message"],
     }
+
+
+# --- connectors and MCP approvals ---
+
+
+def _person(request: Request) -> str:
+    user = auth.current_user(request)
+    return user.email if user else "unknown"
+
+
+@router.get("/workspaces/{workspace}/connectors")
+def list_connectors(workspace: str, engine: Engine = Depends(engine_dep)) -> list[dict]:
+    """Which sources are connected and when they last synced. Secrets are never returned."""
+    return connector_store.status(engine, workspace)
+
+
+class ConnectorIn(BaseModel):
+    api_key: str | None = None
+    settings: dict = {}
+
+
+@router.put("/workspaces/{workspace}/connectors/{provider}")
+def save_connector(
+    workspace: str,
+    provider: str,
+    body: ConnectorIn,
+    request: Request,
+    engine: Engine = Depends(engine_dep),
+) -> list[dict]:
+    """Store an API key (encrypted) and settings for a source."""
+    if provider == "google" and body.api_key:
+        raise HTTPException(400, "Google is connected by signing in, not with a key")
+    if provider == "mcp":
+        if "url" in body.settings:
+            try:
+                check_url(str(body.settings["url"]))
+            except (ValueError, BlockedAddress) as exc:
+                raise HTTPException(400, str(exc)) from exc
+        if body.settings.get("source", "ga4") not in SOURCES:
+            raise HTTPException(400, f"source must be one of: {', '.join(SOURCES)}")
+    secret = {"api_key": body.api_key.strip()} if body.api_key else None
+    if provider == "mcp" and secret is None:
+        secret = {}
+    guard(lambda: connector_store.save(engine, workspace, provider, _person(request),
+                                       secret=secret, settings=body.settings or None))  # fmt: skip
+    return connector_store.status(engine, workspace)
+
+
+@router.delete("/workspaces/{workspace}/connectors/{provider}")
+def delete_connector(workspace: str, provider: str, engine: Engine = Depends(engine_dep)) -> list:
+    connector_store.remove(engine, workspace, provider)
+    return connector_store.status(engine, workspace)
+
+
+@router.post("/workspaces/{workspace}/connectors/google/start")
+def start_google(workspace: str, request: Request) -> dict:
+    """The Google sign-in URL for read-only Search Console and GA4 access."""
+    url = guard(lambda: google_connector.authorization_url(workspace, _person(request)))
+    return {"url": url}
+
+
+@router.get("/connectors/google/callback")
+def google_callback(
+    code: str = "", state: str = "", error: str = "", engine: Engine = Depends(engine_dep)
+):
+    """Where Google sends the person back. The signed state says which workspace and who."""
+    import httpx
+
+    target = "/settings?connected=google#sources"
+    if error or not code:
+        return RedirectResponse(f"/settings?error={error or 'cancelled'}#sources")
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            google_connector.finish(engine, code, state, client)
+    except Exception as exc:  # noqa: BLE001 — shown on the Settings page, not as a stack trace
+        reason = str(exc).replace("\n", " ")[:200]
+        return RedirectResponse(f"/settings?error={reason}#sources")
+    return RedirectResponse(target)
+
+
+@router.post("/workspaces/{workspace}/connectors/sync", status_code=202)
+def sync_now(
+    workspace: str, background: BackgroundTasks, engine: Engine = Depends(engine_dep)
+) -> dict:
+    """Pull fresh metrics from every connected source now."""
+    background.add_task(sync_workspace, engine, workspace, WORKSPACES_DIR)
+    return {"workspace": workspace, "status": "started"}
+
+
+class ApprovalIn(BaseModel):
+    action: str
+
+
+@router.post("/workspaces/{workspace}/mcp/approvals")
+def mcp_approval(workspace: str, body: ApprovalIn, request: Request) -> dict:
+    """A single-use token that lets an MCP client do one action here in the next 15 minutes."""
+    from growthcrew.mcp_server import TOKEN_TTL, mint_approval
+
+    token = guard(lambda: mint_approval(workspace, body.action, _person(request)))
+    return {"token": token, "expires_in": TOKEN_TTL, "action": body.action}

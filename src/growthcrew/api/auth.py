@@ -6,16 +6,15 @@ Users are created from the command line (`growthcrew user add`); there is no ope
 import base64
 import hashlib
 import hmac
-import os
 import secrets
 import time
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
+from growthcrew import keys
 from growthcrew.api.deps import engine_dep
 from growthcrew.db.models import CalendarItem, Cycle, Draft, Signal, User
 
@@ -27,10 +26,11 @@ ID_PARAMS = (
     ("item_id", CalendarItem),
     ("signal_id", Signal),
 )
-PUBLIC_PATHS = {"/health", "/auth/login", "/docs", "/openapi.json"}
+# The Google sign-in callback is reached by the browser without a token; its signed state
+# carries the workspace and the person who started it.
+PUBLIC_PATHS = {"/health", "/auth/login", "/docs", "/openapi.json", "/connectors/google/callback"}
 # Routes with no workspace in them that only an admin may use.
 ADMIN_PREFIXES = ("/costs", "/settings")
-_SECRET_FILE = Path(".secret")
 # After this many wrong passwords for one email, sign-in is refused for LOCKOUT_SECONDS.
 MAX_FAILURES = 5
 LOCKOUT_SECONDS = 15 * 60
@@ -41,12 +41,7 @@ router = APIRouter()
 
 
 def _secret() -> bytes:
-    if value := os.getenv("GROWTHCREW_SECRET"):
-        return value.encode()
-    if not _SECRET_FILE.exists():
-        _SECRET_FILE.write_text(secrets.token_hex(32))
-        _SECRET_FILE.chmod(0o600)
-    return _SECRET_FILE.read_text().strip().encode()
+    return keys.secret()
 
 
 def hash_password(password: str) -> str:

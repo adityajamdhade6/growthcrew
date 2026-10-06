@@ -165,6 +165,8 @@ class CalendarItem(SQLModel, table=True):
     published_by: str | None = None
     # Where it went live; used to match analytics rows back to the piece.
     published_url: str | None = None
+    # The id an integration gave it when it published (e.g. a Brevo campaign id), for stats.
+    external_id: str | None = None
     metrics_json: str = ""
 
 
@@ -510,3 +512,61 @@ class PanelRun(SQLModel, table=True):
     recommendation: str = "{}"
     # untested, low, useful: how far the panel's past predictions matched real results.
     trust: str = "untested"
+
+
+class ConnectorCredential(SQLModel, table=True):
+    """One workspace's connection to a data source. The secret part is encrypted at rest."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    # google, brevo, hubspot, mcp
+    provider: str = Field(index=True)
+    # Tokens and keys, encrypted with keys.encrypt. Never returned by the API.
+    secret: str = ""
+    # Non-secret settings as JSON: site URL, GA4 property, list id, sender, MCP server.
+    settings: str = "{}"
+    scopes: str = ""
+    connected_by: str = ""
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class SyncRun(SQLModel, table=True):
+    """One scheduled or manual pull from one connector."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    provider: str
+    started_at: datetime = Field(default_factory=_now, index=True)
+    finished_at: datetime | None = None
+    rows: int = 0
+    matched: int = 0
+    # ok, failed
+    status: str = "running"
+    error: str = ""
+
+
+class CrmSnapshot(SQLModel, table=True):
+    """Leads and pipeline from the CRM on one day."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace: str = Field(index=True)
+    taken_at: datetime = Field(default_factory=_now, index=True)
+    source: str = "hubspot"
+    new_contacts: int = 0
+    open_deals: int = 0
+    pipeline_value: float = 0.0
+    won_deals: int = 0
+    won_value: float = 0.0
+    # New contacts by original source (organic search, social, email...), as JSON.
+    contacts_by_source: str = "{}"
+
+
+class ApprovalTokenUse(SQLModel, table=True):
+    """An MCP approval token that has been spent. Each token works once."""
+
+    nonce: str = Field(primary_key=True)
+    used_at: datetime = Field(default_factory=_now)
+    workspace: str
+    action: str
+    approved_by: str

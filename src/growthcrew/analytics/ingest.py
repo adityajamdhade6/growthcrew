@@ -104,7 +104,16 @@ def ingest(engine: Engine, workspace: str, source: str, text: str) -> IngestResu
     """Store an export. A row with the same source, item and date replaces the earlier one."""
     if source not in SOURCES:
         raise ValueError(f"Unknown source '{source}'. Use one of: {', '.join(SOURCES)}")
-    parsed = parse_csv(text)
+    return store_rows(engine, workspace, source, parse_csv(text))
+
+
+def store_rows(engine: Engine, workspace: str, source: str, parsed: list[dict]) -> IngestResult:
+    """Match normalised rows to pieces and store them. Used by uploads and by connectors.
+
+    Each row has `refs` (what identifies the item, best first), `date`, and any of the
+    numeric fields in ALIASES. A row that matches no piece is kept and reported as unmatched,
+    never assigned by guess.
+    """
     unmatched: list[str] = []
     with Session(engine) as session:
         drafts = [
@@ -115,8 +124,10 @@ def ingest(engine: Engine, workspace: str, source: str, text: str) -> IngestResu
                 select(Draft).where(Draft.workspace == workspace, Draft.status == "approved")
             )
         ]  # fmt: skip
-        for row in parsed:
-            refs = row.pop("refs")
+        for raw in parsed:
+            row = {field: raw.get(field, 0.0) for field in ALIASES}
+            row["date"] = raw.get("date")
+            refs = [ref for ref in raw["refs"] if ref]
             draft_id = match_draft(refs, drafts)
             if draft_id is None:
                 unmatched.append(refs[0])

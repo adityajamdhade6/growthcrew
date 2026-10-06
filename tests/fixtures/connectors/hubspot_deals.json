@@ -1,0 +1,6 @@
+{"results": [
+  {"id": "9001", "properties": {"amount": "12000", "hs_is_closed": "false", "hs_is_closed_won": "false"}},
+  {"id": "9002", "properties": {"amount": "8000.50", "hs_is_closed": "false", "hs_is_closed_won": "false"}},
+  {"id": "9003", "properties": {"amount": "5000", "hs_is_closed": "true", "hs_is_closed_won": "true"}},
+  {"id": "9004", "properties": {"amount": null, "hs_is_closed": "true", "hs_is_closed_won": "false"}}
+ ]}

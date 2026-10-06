@@ -52,6 +52,30 @@ logger = logging.getLogger(__name__)
 AUTOMATED = STAGES[: STAGES.index("awaiting_approval")]
 
 
+def draft_from_piece(piece, cycle_id: int, workspace: str, version: int) -> Draft:
+    """The Draft row for one written piece, waiting for a person (or blocked by a guardrail)."""
+    final = piece.final
+    return Draft(
+        cycle_id=cycle_id,
+        workspace=workspace,
+        piece_id=piece.id,
+        content_type=piece.request.content_type,
+        angle=piece.angle,
+        day=piece.day,
+        original_text=final.text,
+        text=final.text,
+        body_json=json.dumps(final.body),
+        metadata_json=final.metadata.model_dump_json(),
+        min_score=min(final.critique.scores().values()),
+        passed_critic=piece.passed,
+        prompt_version=piece.prompt_version,
+        strategy_version=version,
+        memory_json=piece.memory.model_dump_json(),
+        history_json=json.dumps([v.model_dump(mode="json") for v in piece.versions]),
+        status="blocked" if piece.blocked else "pending_approval",
+    )
+
+
 def _aware(moment: datetime) -> datetime:
     return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
@@ -353,30 +377,7 @@ class Orchestrator:
         version = strategy_version(workspace, self.root)
         with Session(self.engine) as session:
             for piece in batch.pieces:
-                final = piece.final
-                session.add(
-                    Draft(
-                        cycle_id=cycle.id,
-                        workspace=workspace,
-                        piece_id=piece.id,
-                        content_type=piece.request.content_type,
-                        angle=piece.angle,
-                        day=piece.day,
-                        original_text=final.text,
-                        text=final.text,
-                        body_json=json.dumps(final.body),
-                        metadata_json=final.metadata.model_dump_json(),
-                        min_score=min(final.critique.scores().values()),
-                        passed_critic=piece.passed,
-                        prompt_version=piece.prompt_version,
-                        strategy_version=version,
-                        memory_json=piece.memory.model_dump_json(),
-                        history_json=json.dumps(
-                            [version.model_dump(mode="json") for version in piece.versions]
-                        ),
-                        status="blocked" if piece.blocked else "pending_approval",
-                    )
-                )
+                session.add(draft_from_piece(piece, cycle.id, workspace, version))
             session.commit()
         rounds = sum(len(piece.versions) for piece in batch.pieces)
         return (
