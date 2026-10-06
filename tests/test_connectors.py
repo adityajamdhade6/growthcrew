@@ -86,7 +86,8 @@ def approved_draft(engine, kind="linkedin_post", piece="01-day01-linkedin_post",
         session.add(draft)
         session.flush()
         item = CalendarItem(draft_id=draft.id, cycle_id=1, workspace="acme",
-                            scheduled_for=datetime(2026, 10, 1, tzinfo=UTC), channel=kind)  # fmt: skip
+                            scheduled_for=datetime(2026, 10, 1, tzinfo=UTC),
+                            channel=kind)  # fmt: skip
         session.add(item)
         session.commit()
         return draft, item
@@ -391,8 +392,8 @@ def test_connector_routes_never_return_secrets(engine, tmp_path):
     app.dependency_overrides[engine_dep] = lambda: engine
     try:
         client = TestClient(app)
-        saved = client.put("/workspaces/acme/connectors/brevo",
-                           json={"api_key": "xkeysib-SECRET", "settings": {"list_id": "4"}})  # fmt: skip
+        body = {"api_key": "xkeysib-SECRET", "settings": {"list_id": "4"}}
+        saved = client.put("/workspaces/acme/connectors/brevo", json=body)
         assert saved.status_code == 200 and "SECRET" not in saved.text
         brevo_row = next(r for r in saved.json() if r["provider"] == "brevo")
         assert brevo_row["connected"] and brevo_row["settings"] == {"list_id": "4"}

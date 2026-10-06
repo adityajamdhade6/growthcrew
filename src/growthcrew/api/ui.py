@@ -32,7 +32,6 @@ from growthcrew.config import AgentRole
 from growthcrew.connectors import google as google_connector
 from growthcrew.connectors import store as connector_store
 from growthcrew.connectors.mcp_source import check_url
-from growthcrew.tools.fetch import BlockedAddress
 from growthcrew.connectors.sync import sync_workspace
 from growthcrew.creative import agent as creative
 from growthcrew.creative.images import generator as image_generator
@@ -59,6 +58,7 @@ from growthcrew.monitor.seo import ranking_history
 from growthcrew.panel import calibration as panel_calibration
 from growthcrew.panel import personas as panel_personas
 from growthcrew.reports.strategy import save_strategy
+from growthcrew.tools.fetch import BlockedAddress
 from growthcrew.workflow import require_approved
 
 router = APIRouter()

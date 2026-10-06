@@ -121,6 +121,15 @@ Images are part of the draft's review: the review panel shows the three sizes si
 with the critic's scores, fixes and the measured checks, and says when the text has been
 edited since the images were made. Downloading an image for use needs an approved ad.
 
+## Live data and MCP
+
+`connectors/` pulls Search Console, GA4, Brevo and HubSpot data daily (`scheduler.py`) into the
+same matching path as CSV uploads (`analytics.ingest.store_rows`), so unmatched rows are still
+reported, never guessed. Credentials are per workspace and encrypted (`keys.py`). Brevo is the
+first registered publisher, reachable only through `workflow.publish`. `mcp_server.py` exposes
+read-only tools and one approval-token-gated write tool; `connectors/mcp_source.py` reads rows
+from other MCP servers. See [mcp.md](mcp.md).
+
 ## The synthetic audience panel
 
 `panel/` pre-tests every new experiment before launch, at the end of the weekly cycle's critic
@@ -248,6 +257,7 @@ columns added at startup; there is no migration tool yet.
 | `KeywordRank` | Search Console rows: each query's position, clicks and impressions by date |
 | `Creative` | Each rendered size of an ad image per critic round: slots, scores, fixes, measured checks, whether it passed, whether any image on it was AI-generated |
 | `Persona`, `PanelRun` | Synthetic personas by generation, with their evidence; each pre-test with every reaction, the predicted ranking, the advice and the trust level at the time |
+| `ConnectorCredential`, `SyncRun`, `CrmSnapshot`, `ApprovalTokenUse` | Encrypted per-workspace credentials, each sync's result, daily CRM counts, spent MCP approval tokens |
 | `Signal` | Monitor findings with their sources and dates, importance, status (new, sent, dismissed) and who decided |
 
 Fetched pages and search results are cached on disk under `.cache/` for up to a week.
@@ -266,4 +276,4 @@ Fetched pages and search results are cached on disk under `.cache/` for up to a 
 The model (Anthropic API), a search API, the sites the researcher and the monitors read, and,
 only when switched on, an image-generation API. Fetches go through
 one client that refuses private addresses, honours robots.txt, rate-limits per host and caches.
-Nothing is sent anywhere else, and nothing is posted to any platform.
+Approved newsletters can be sent through Brevo by a named person; nothing else is posted anywhere.
